@@ -8,6 +8,8 @@ Extract a catalog of MapleStory Worlds resources, cache them via the MSW Builder
 
 **How it works:** You create a MapleStory World, set up a local workspace, merge this repo into it, then run a script, load cache in the builder in a custom world, and run a final script. The catalog is written once to **RootDesk/MyDesk/** and shared by all steps automatically — no manual file copying or moving at any point.
 
+**Known issues:** Image offsets are unverified; they passed initial testing but should have more testing before relying on them.
+
 ---
 
 ## Quick start (Steps 1–6)
@@ -59,6 +61,8 @@ You can shrink the catalog (and save time in Steps 4, 5, and 6) by limiting whic
 - **By subcategory:** Edit **Metadata Downloader/steps/category_subcategories.json**. Under each category’s `subcategories` object, remove the entries you don’t want (e.g. remove `"12": "background"` to skip background sprites). To skip the “all” segment for a category, remove its `"-1": "all"` entry. Only what’s listed is scraped; `-1` is scraped last when present. After editing, run **Step 0** again so `last_pages.csv` matches, then run Step 4 as usual.
 - **By category:** When running the metadata script (Step 4), you can pass **--categories** (e.g. `0,1,3` to skip avatar items). From the **Metadata Downloader** folder: `python steps/1-collect.py -o path/to/output.csv --categories 0,1,3 ...` (see [Metadata Downloader/README.md](Metadata%20Downloader/README.md) for full options).
 
+
+If you do not remove the `"-1":"all"` category, you will STILL DOWNLOAD ALL ASSETS for that category. If you remove subcategories, it is **recommended** to remove the all subcategory as well. It keep it as a fallback to make sure you get everything, but it *significantly* increases the time step 4 takes to complete.
 ---
 
 ### Step 4 — Download the resource catalog
