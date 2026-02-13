@@ -285,6 +285,22 @@ if ([string]::IsNullOrWhiteSpace($OutputFormat)) {
 }
 $env:ASSET_EXTRACTION_OUTPUT_FORMAT = $OutputFormat
 
+# FTS5 trigram prompt: fast wildcard tag search (only relevant when building a DB)
+$enableFts5 = $false
+if ($OutputFormat -ne "csv") {
+    if ($NonInteractive) {
+        $enableFts5 = $true
+    } else {
+        Write-Host ""
+        Write-Host "Tag search mode (for the metadata DB):"
+        Write-Host "  1 = Prefix only  (e.g. 'sword...' — fast with standard indexes, no extra DB size)"
+        Write-Host "  2 = Full wildcard (e.g. '...sword...' — uses FTS5 trigram index; adds ~1-3 GB to DB)"
+        $r = Read-Host "Choice (1 or 2) [2]"
+        $enableFts5 = ($r -ne "1")
+    }
+}
+$env:ASSET_EXTRACTION_FTS5_TRIGRAM = if ($enableFts5) { "1" } else { "0" }
+
 # Confirm before running unless -NonInteractive (avoids accidentally overwriting output/ on normal run)
 if (-not $NonInteractive) {
     if ($Test) {
@@ -300,7 +316,8 @@ $runOnlyOneStep = ($OnlyStep -ge 1 -and $OnlyStep -le 7)
 if ($runOnlyOneStep) { $StartAtStep = $OnlyStep }
 
 Write-Host "Asset extraction pipeline (7 steps). Home: $HomeDir"
-Write-Host "Test=$Test SkipExisting=$SkipExisting Workers=$effectiveWorkers OutputFormat=$OutputFormat"
+$fts5Label = if ($enableFts5) { "yes" } else { "no" }
+Write-Host "Test=$Test SkipExisting=$SkipExisting Workers=$effectiveWorkers OutputFormat=$OutputFormat Fts5Trigram=$fts5Label"
 if ($runOnlyOneStep) { Write-Host "OnlyStep: $OnlyStep" }
 elseif ($StartAtStep -gt 1) { Write-Host "StartAtStep: $StartAtStep" }
 if ($chosenCsv) { Write-Host "Catalog CSV: $([System.IO.Path]::GetFileName($chosenCsv))" }
@@ -335,7 +352,7 @@ $header = @"
 ================================================================================
 Asset extraction pipeline (7 steps) - $logTimestamp
 Started: $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-Test=$Test SkipExisting=$SkipExisting Workers=$effectiveWorkers
+Test=$Test SkipExisting=$SkipExisting Workers=$effectiveWorkers Fts5Trigram=$enableFts5
 StartAtStep=$StartAtStep OnlyStep=$OnlyStep (steps: $($stepsToRun.Count))
 ================================================================================
 
@@ -371,7 +388,7 @@ foreach ($s in $stepsToRun) {
     foreach ($k in $commonArgs.Keys) { $allParams[$k] = $commonArgs[$k] }
     foreach ($k in $s.Extra.Keys) { $allParams[$k] = $s.Extra[$k] }
     if ($s.N -eq 1 -and $chosenCsv) { $allParams["CsvPath"] = $chosenCsv }
-    if ($s.N -eq 6) { $allParams["OutputFormat"] = $OutputFormat }
+    if ($s.N -eq 6) { $allParams["OutputFormat"] = $OutputFormat; if ($enableFts5) { $allParams["EnableFts5"] = $true } }
     # When not Test, point steps 6 and 7 at real output; when Test they use env ASSET_EXTRACTION_OUTPUT_DIR
     if (-not $Test) {
         if ($s.N -eq 6) { $allParams["OutDb"] = Join-Path $HomeDir "output\metadata.db" }

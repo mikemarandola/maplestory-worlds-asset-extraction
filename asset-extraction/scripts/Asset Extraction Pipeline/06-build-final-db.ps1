@@ -8,6 +8,7 @@ param(
     [string] $OutputFormat = "",   # sqlite = build metadata.db; csv = final_*.csv only; both = DB and CSVs. Default from env or sqlite.
     [int] $Workers = 0,   # when > 0, DuckDB uses this many threads (e.g. 1 for single-thread)
     [switch] $SkipExisting,
+    [switch] $EnableFts5,  # create FTS5 trigram index on tag_names for fast wildcard substring search
     [switch] $Test
 )
 
@@ -27,6 +28,7 @@ $imagesDir = Join-Path $outputDirActual "images"
 $audioDir = Join-Path $outputDirActual "audio"
 
 $outputFormatActual = if ([string]::IsNullOrWhiteSpace($OutputFormat)) { if ($env:ASSET_EXTRACTION_OUTPUT_FORMAT) { $env:ASSET_EXTRACTION_OUTPUT_FORMAT } else { "sqlite" } } else { $OutputFormat }
+$enableFts5Actual = if ($EnableFts5) { $true } elseif ($env:ASSET_EXTRACTION_FTS5_TRIGRAM -eq "1") { $true } else { $false }
 
 $existingPathsCsv = Join-Path $stagingDirActual "existing_paths.csv"
 $catalogCsv = Join-Path $stagingDirActual "catalog.csv"
@@ -95,6 +97,25 @@ try {
     if (Test-Path $outDbTmp) { Remove-Item $outDbTmp -Force }
     & sqlite3 $outDbTmp ".read '$($tmpSqliteSql -replace "'", "''")'"
     if ($LASTEXITCODE -ne 0) { Write-Error "Phase C failed (exit $LASTEXITCODE)."; exit $LASTEXITCODE }
+
+    # FTS5 trigram: create virtual table for fast wildcard substring search on tag_names
+    if ($enableFts5Actual) {
+        # Verify sqlite3 supports FTS5 trigram tokenizer
+        & sqlite3 ":memory:" "CREATE VIRTUAL TABLE _t USING fts5(x, tokenize='trigram');" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "FTS5 trigram not supported by this sqlite3 build. Skipping fast wildcard index."
+        } else {
+            Write-Host "  Creating FTS5 trigram index on tag_names (this may take a few minutes)..."
+            $fts5Sql = @"
+CREATE VIRTUAL TABLE tag_names_fts USING fts5(name, content=tag_names, content_rowid=id, tokenize='trigram');
+INSERT INTO tag_names_fts(tag_names_fts) VALUES('rebuild');
+"@
+            & sqlite3 $outDbTmp $fts5Sql
+            if ($LASTEXITCODE -ne 0) { Write-Error "FTS5 trigram index creation failed (exit $LASTEXITCODE)."; exit $LASTEXITCODE }
+            Write-Host "  FTS5 trigram index created."
+        }
+    }
+
     if (Test-Path $outDbPath) { Remove-Item $outDbPath -Force }
     Move-Item $outDbTmp $outDbPath -Force
     Write-Host "  Written: $outDbPath"
