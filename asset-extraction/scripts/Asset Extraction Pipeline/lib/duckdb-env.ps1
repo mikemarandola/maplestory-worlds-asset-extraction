@@ -28,13 +28,6 @@ function Ensure-DuckDBTools {
     }
 }
 
-function Ensure-Sqlite3 {
-    if (-not (Get-Command sqlite3 -ErrorAction SilentlyContinue)) {
-        Write-Error "sqlite3 CLI not found. Install: winget install -e --id SQLite.SQLite --accept-package-agreements (or https://sqlite.org/download.html)"
-        exit 1
-    }
-}
-
 function Initialize-DuckDBStaging {
     param([string] $StagingDir)
     $duckdbTemp = Join-Path $StagingDir "duckdb_temp"

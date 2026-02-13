@@ -13,8 +13,8 @@ CREATE TEMP TABLE enc_keys AS SELECT * FROM read_csv_auto('{staging}/enc_keys.cs
 CREATE TEMP TABLE frame_index AS SELECT * FROM read_csv_auto('{staging}/frame_index.csv', header=true);
 CREATE TEMP TABLE existing_paths AS SELECT * FROM read_csv_auto('{staging}/existing_paths.csv', header=true);
 
--- 1) tag_names: distinct tags from catalog.tags_normalized, id = row_number
-CREATE TEMP TABLE _tag_names AS
+-- 1) tags: distinct tags from catalog.tags_normalized, id = row_number
+CREATE TEMP TABLE _tags AS
 SELECT row_number() OVER (ORDER BY name) AS id, name
 FROM (
     SELECT DISTINCT trim(lower(tag)) AS name
@@ -25,10 +25,10 @@ FROM (
     )
     WHERE trim(tag) != ''
 );
-COPY (SELECT id, name FROM _tag_names ORDER BY id) TO '{staging}/final_tag_names.csv' (HEADER false, DELIMITER ',');
+COPY (SELECT id, name FROM _tags ORDER BY id) TO '{staging}/final_tags.csv' (HEADER false, DELIMITER ',');
 
--- 2) tags: (id, ruid, tag_id, created_at, updated_at). DuckDB does not allow COPY after WITH; materialize first.
-CREATE TEMP TABLE _tags_result AS
+-- 2) asset_tags: (id, ruid, tag_id, created_at, updated_at). DuckDB does not allow COPY after WITH; materialize first.
+CREATE TEMP TABLE _asset_tags_result AS
 WITH tag_pairs AS (
     SELECT trim(c.ruid) AS ruid, trim(lower(unnest(regexp_split_to_array(CAST(COALESCE(c.tags_normalized,'') AS VARCHAR), '[|,]')))) AS tag_name
     FROM catalog c
@@ -37,7 +37,7 @@ WITH tag_pairs AS (
 tags_resolved AS (
     SELECT DISTINCT p.ruid, tn.id AS tag_id
     FROM tag_pairs p
-    JOIN _tag_names tn ON tn.name = p.tag_name
+    JOIN _tags tn ON tn.name = p.tag_name
     WHERE p.tag_name != ''
 ),
 tags_numbered AS (
@@ -47,7 +47,7 @@ tags_numbered AS (
     FROM tags_resolved
 )
 SELECT id, ruid, tag_id, created_at, updated_at FROM tags_numbered;
-COPY (SELECT id, ruid, tag_id, created_at, updated_at FROM _tags_result) TO '{staging}/final_tags.csv' (HEADER false, DELIMITER ',');
+COPY (SELECT id, ruid, tag_id, created_at, updated_at FROM _asset_tags_result) TO '{staging}/final_asset_tags.csv' (HEADER false, DELIMITER ',');
 
 -- 3) Enriched view: catalog_enriched + offsets, dedupe by ruid (first-wins). Materialize so we reuse for animation_frames and assets.
 -- Cast offset_x/offset_y to DOUBLE (CSV may read as VARCHAR); COALESCE with 0.0 to avoid type mismatch.

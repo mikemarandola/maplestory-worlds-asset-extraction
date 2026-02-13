@@ -4,6 +4,7 @@
  * Animation clips do not get their own thumb file; DB has thumbnail_ruid = median frame RUID.
  * Output: thumbs/<ruid>.png. Requires: output/images (step 4), temp/ruids.csv (step 2).
  * Default: overwrites existing thumb files. Use --skip-existing to skip files that already exist.
+ * DB mode reads from a PGLite metadata directory (output/metadata).
  */
 const fs = require('fs');
 const path = require('path');
@@ -165,37 +166,40 @@ async function main() {
       totalProcessed = workItems.length;
       if (workItems.length > 0) await runWithLimit(workItems, concurrency, writeThumb);
     } else {
-      const Database = require('better-sqlite3');
-      const db = new Database(opts.db, { readonly: true });
-      const hasAssets = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='assets'").get();
-      const table = hasAssets ? 'assets' : 'catalog_enriched';
-      const stmt = db.prepare(`
-        SELECT DISTINCT ruid FROM ${table}
-        WHERE LOWER(TRIM(asset_type)) IN ('sprite', 'damageskin', 'avataritem', 'atlas')
-      `);
+      // PGLite (async) — dynamic import since this file is CJS
+      const { PGlite } = await import('@electric-sql/pglite');
+      const db = await PGlite.create(opts.db);
+
+      // Check if 'assets' table exists
+      const { rows: tableCheck } = await db.query(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = 'assets'"
+      );
+      const table = tableCheck.length > 0 ? 'assets' : 'catalog_enriched';
+
       console.log('RUIDs from DB: streaming in batches of', RUID_BATCH_SIZE);
-      let ruidBatch = [];
-      for (const row of stmt.iterate()) {
-        const ruid = (row.ruid || '').trim();
-        if (!ruid) continue;
-        ruidBatch.push(ruid);
-        if (ruidBatch.length >= RUID_BATCH_SIZE) {
+
+      // Use cursor-based iteration for large result sets
+      await db.transaction(async (tx) => {
+        await tx.exec(`DECLARE ruid_cursor CURSOR FOR
+          SELECT DISTINCT ruid FROM ${table}
+          WHERE LOWER(TRIM(asset_type)) IN ('sprite', 'damageskin', 'avataritem', 'atlas')`);
+
+        while (true) {
+          const { rows } = await tx.query(`FETCH ${RUID_BATCH_SIZE} FROM ruid_cursor`);
+          if (rows.length === 0) break;
+
+          const ruidBatch = rows.map((r) => (r.ruid || '').trim()).filter(Boolean);
           const workItems = ruidBatch
             .map((r) => ({ ruid: r, src: imageMap.get(r.toLowerCase()), outPath: path.join(thumbsDir, r + '.png') }))
             .filter((w) => w.src);
           if (workItems.length > 0) await runWithLimit(workItems, concurrency, writeThumb);
           totalProcessed += ruidBatch.length;
-          ruidBatch = [];
         }
-      }
-      if (ruidBatch.length > 0) {
-        const workItems = ruidBatch
-          .map((r) => ({ ruid: r, src: imageMap.get(r.toLowerCase()), outPath: path.join(thumbsDir, r + '.png') }))
-          .filter((w) => w.src);
-        if (workItems.length > 0) await runWithLimit(workItems, concurrency, writeThumb);
-        totalProcessed += ruidBatch.length;
-      }
-      db.close();
+
+        await tx.exec('CLOSE ruid_cursor');
+      });
+
+      await db.close();
     }
   } else {
     console.log('Reading master CSV...');

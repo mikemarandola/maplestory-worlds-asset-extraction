@@ -1,12 +1,12 @@
 # MSW Asset Extraction Pipeline
 
-Takes MSW cached assets and a **resources catalog CSV** and produces extracted images/audio, animation frame data, a **SQLite metadata DB**, and thumbnails. Used by the skill-editor asset browser.
+Takes MSW cached assets and a **resources catalog CSV** and produces extracted images/audio, animation frame data, a **PGLite metadata DB**, and thumbnails. Used by the skill-editor asset browser.
 
 **Paths:** All paths are relative to this folder (the one containing `run-asset-extraction.ps1`). Store the project anywhere; scripts resolve paths from this directory.
 
 **Runner:** **run-asset-extraction.ps1** (in this folder). It runs **7 steps** under **scripts/Asset Extraction Pipeline/** (PowerShell step scripts, **helper-scripts/** for Node.js, **sql/** for DuckDB).
 
-**Requirements:** PowerShell 7+, Node.js, **DuckDB CLI**, **sqlite3** CLI, and npm dependencies (`npm install`). MSW resource cache must be populated (open Builder → Resource Storage and browse).  
+**Requirements:** PowerShell 7+, Node.js, **DuckDB CLI**, and npm dependencies (`npm install`). MSW resource cache must be populated (open Builder → Resource Storage and browse).  
 When you run the script **without -NonInteractive**, it will prompt to install any missing dependency (via **winget** on Windows) or run **npm install** if node_modules are missing; confirm with Y to install.
 
 **Run the full pipeline:**
@@ -18,7 +18,7 @@ cd asset-extraction   # or: cd "path\to\where\you\stored\asset-extraction"
 .\run-asset-extraction.ps1
 ```
 
-**Catalog:** The pipeline uses **RootDesk/MyDesk/resources.csv** (created by the metadata extraction step — `run-metadata.ps1`). It must have columns: **RUID**, **Category**, **Subcategory**, **Format**, **Tags** (optional: Date, Name). Step 1 writes **output/staging/catalog.csv**; later steps read from **output/staging/** and write images, audio, and **output/metadata.db** there.
+**Catalog:** The pipeline uses **RootDesk/MyDesk/resources.csv** (created by the metadata extraction step — `run-metadata.ps1`). It must have columns: **RUID**, **Category**, **Subcategory**, **Format**, **Tags** (optional: Date, Name). Step 1 writes **output/staging/catalog.csv**; later steps read from **output/staging/** and write images, audio, and **output/metadata/** there.
 
 **Test run (no overwrite):** All step outputs go to **output-test/** and **temp-test/**; main **output/** and **temp/** are unchanged.
 
@@ -52,10 +52,10 @@ cd asset-extraction   # or: cd "path\to\where\you\stored\asset-extraction"
 | **-StartAtStep N** | Run steps N through 7 (1–7). |
 | **-OnlyStep N** | Run only step N (1–7). |
 | **-AssetExtractionRoot "path"** | Use this folder as the asset-extraction root (default: directory containing the script). Lets you run from another CWD or after moving the folder. |
-| **-NonInteractive** | No prompts; use RootDesk/MyDesk/resources.csv. Output format defaults to SQLite. |
-| **-OutputFormat sqlite \| csv \| both** | Final output: **sqlite** = output/metadata.db only (default). **csv** = only the 5 final_*.csv in output/staging (no metadata.db); step 7 skipped. **both** = metadata.db and the 5 final_*.csv. |
+| **-NonInteractive** | No prompts; use RootDesk/MyDesk/resources.csv. Output format defaults to PGLite. |
+| **-OutputFormat pglite \| csv \| both** | Final output: **pglite** = output/metadata/ directory only (default). **csv** = only the 5 final_*.csv in output/staging (no metadata DB); step 7 skipped. **both** = metadata/ and the 5 final_*.csv. |
 
-When running without -NonInteractive, you are prompted: **Final output format: 1 = SQLite DB, 2 = CSV per table only, 3 = Both.** Choose 1, 2, or 3; default is 1.
+When running without -NonInteractive, you are prompted: **Final output format: 1 = PGLite DB, 2 = CSV per table only, 3 = Both.** Choose 1, 2, or 3; default is 1.
 
 Examples:
 
@@ -75,7 +75,7 @@ All paths are relative to the **asset-extraction root**—the folder that contai
 
 | Path | Purpose |
 |------|--------|
-| **output/** | After pipeline: **output/images/** (Category/Subcategory/ruid.png), **output/audio/** (Category/Subcategory/ruid.ogg), **output/thumbs/** (ruid.png), **output/metadata.db**. |
+| **output/** | After pipeline: **output/images/** (Category/Subcategory/ruid.png), **output/audio/** (Category/Subcategory/ruid.ogg), **output/thumbs/** (ruid.png), **output/metadata/** (PGLite data dir). |
 | **output/staging/** | Intermediate CSVs: catalog.csv, catalog_enriched.csv, cache_index.csv, extract_list.csv, offsets.csv, sprite_list.csv, enc_keys.csv, clip_list.csv, enc_ruid_map.csv, frame_index.csv, existing_paths.csv, final_*.csv. Used by steps 1–6. |
 | **temp/** | Offsets staging (e.g. offsets-staging.jsonl) during step 3. |
 | **output-test/**, **temp-test/** | Used only when **-Test**; same structure as output/ and temp/, so the main pipeline is never overwritten. |
@@ -141,18 +141,18 @@ All paths are relative to the **asset-extraction root**—the folder that contai
 
 **Script:** `scripts/Asset Extraction Pipeline/06-build-final-db.ps1`  
 **Input:** All staging CSVs (catalog, catalog_enriched, offsets, enc_keys, frame_index); **output/images** and **output/audio** (for existence checks).  
-**Output:** **output/staging/existing_paths.csv** (Phase A), **output/staging/final_tag_names.csv**, **final_tags.csv**, **final_assets.csv**, **final_animation_frames.csv**, **final_cache_locations.csv** (Phase B), **output/metadata.db** (Phase C).  
-**How:** Phase A: Node **walk-output-to-csv.js** lists existing image/audio paths → existing_paths.csv. Phase B: DuckDB loads all staging CSVs, builds tag_names, tags, enriched view, animation_frames, assets, cache_locations, exports 5 final CSVs. Phase C (when output format is **sqlite** or **both**): sqlite3 creates a fresh **metadata.db** and imports the final CSVs (schema in **sql/06-create-sqlite.sql**). When output format is **csv**, Phase C is skipped and only the 5 final_*.csv files are produced. **both** produces the CSVs (Phase B) and metadata.db (Phase C).  
-**Run alone:** `.\scripts\Asset Extraction Pipeline\06-build-final-db.ps1` `-OutDb` `-StagingDir` `-OutputDir` `-OutputFormat sqlite|csv|both` `-Workers N` `-Test`
+**Output:** **output/staging/existing_paths.csv** (Phase A), **output/staging/final_tags.csv**, **final_asset_tags.csv**, **final_assets.csv**, **final_animation_frames.csv**, **final_cache_locations.csv** (Phase B), **output/metadata/** (Phase C).  
+**How:** Phase A: Node **walk-output-to-csv.js** lists existing image/audio paths → existing_paths.csv. Phase B: DuckDB loads all staging CSVs, builds tags, asset_tags, enriched view, animation_frames, assets, cache_locations, exports 5 final CSVs. Phase C (when output format is **pglite** or **both**): Node **create-pglite-db.mjs** creates a PGLite database directory and imports the final CSVs. Optional **pg_trgm** GIN trigram index enables fast wildcard tag search (`LIKE '%keyword%'`). When output format is **csv**, Phase C is skipped and only the 5 final_*.csv files are produced. **both** produces the CSVs (Phase B) and PGLite metadata (Phase C).  
+**Run alone:** `.\scripts\Asset Extraction Pipeline\06-build-final-db.ps1` `-OutDb` `-StagingDir` `-OutputDir` `-OutputFormat pglite|csv|both` `-EnableTrigram` `-Workers N` `-Test`
 
 ---
 
 ## Step 7 — Build thumbnails
 
 **Script:** `scripts/Asset Extraction Pipeline/07-build-thumbs.ps1`  
-**Input:** **output/metadata.db**, **output/images**.  
+**Input:** **output/metadata/** (PGLite data dir), **output/images**.  
 **Output:** **output/thumbs/ruid.png** — one per image-bearing asset (sprite, damageskin, avataritem, atlas). Animation clips use **thumbnail_ruid** in the DB (median frame); consumers use **thumbs/<thumbnail_ruid>.png**.  
-**How:** Node **build-thumbs.js** reads assets from metadata.db, resizes images from output/images, writes to output/thumbs. **Without -Test:** it iterates DB RUIDs (sprite/damageskin/avataritem/atlas) and creates a thumb only when that RUID has a file in output/images. **With -Test:** it is driven by the images dir (one thumb per image, up to the test limit) so every extracted image gets a thumb and you don't get fewer thumbs than images due to DB order. **-SkipExisting** skips existing thumb files.  
+**How:** Node **build-thumbs.js** reads assets from the PGLite metadata directory, resizes images from output/images, writes to output/thumbs. **Without -Test:** it iterates DB RUIDs (sprite/damageskin/avataritem/atlas) and creates a thumb only when that RUID has a file in output/images. **With -Test:** it is driven by the images dir (one thumb per image, up to the test limit) so every extracted image gets a thumb and you don't get fewer thumbs than images due to DB order. **-SkipExisting** skips existing thumb files.  
 **Run alone:** `.\scripts\Asset Extraction Pipeline\07-build-thumbs.ps1` `-OutDb` `-OutputDir` `-ImagesDir` `-ThumbsDir` `-SkipExisting` `-Test` `-Concurrency N`
 
 ---

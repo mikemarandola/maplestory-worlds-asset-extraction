@@ -1,14 +1,14 @@
 {
   "name": "asset-extraction",
   "version": "0.1.0",
-  "description": "MSW asset extraction pipeline; step 7 builds metadata SQLite DB.",
+  "description": "MSW asset extraction pipeline; step 6 builds PGLite metadata DB.",
   "private": true,
   "scripts": {
     "build-metadata-db": "node scripts/build-metadata-db.js",
     "build-thumbs": "node scripts/build-thumbs.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.6.0",
+    "@electric-sql/pglite": "^0.3.15",
     "csv-parse": "^5.6.0",
     "decode-dxt": "^1.0.1",
     "gifenc": "^1.0.3",

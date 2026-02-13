@@ -4,7 +4,7 @@
 
 ---
 
-Extract a catalog of MapleStory Worlds resources, cache them via the MSW Builder client, then extract images, audio, and a metadata SQLite DB or CSV for use in your own workflows to speed up development.
+Extract a catalog of MapleStory Worlds resources, cache them via the MSW Builder client, then extract images, audio, and a PGLite metadata DB or CSV for use in your own workflows to speed up development.
 
 **How it works:** You create a MapleStory World, set up a local workspace, merge this repo into it, then run a script, load cache in the builder in a custom world, and run a final script. The catalog is written once to **RootDesk/MyDesk/** and shared by all steps automatically — no manual file copying or moving at any point.
 
@@ -31,7 +31,7 @@ Install these two things manually — everything else is prompted by the scripts
 1. **PowerShell 7 or later** — `winget install Microsoft.PowerShell` or download from [PowerShell GitHub](https://github.com/PowerShell/PowerShell#get-powershell). The scripts cannot run without it.
 2. **MapleStory Worlds Builder** — install from [MapleStory Worlds](https://maplestoryworlds.nexon.com). Needed for Step 5.
 
-The scripts also need **Python 3.7+** and **Node.js**, but they will detect if these are missing and tell you how to install them. All other dependencies (Python packages, npm packages, DuckDB, sqlite3) are prompted for installation automatically when you run the scripts.
+The scripts also need **Python 3.7+** and **Node.js**, but they will detect if these are missing and tell you how to install them. All other dependencies (Python packages, npm packages, DuckDB) are prompted for installation automatically when you run the scripts.
 
 ---
 
@@ -62,7 +62,7 @@ You can shrink the catalog (and save time in Steps 4, 5, and 6) by limiting whic
 - **By category:** When running the metadata script (Step 4), you can pass **--categories** (e.g. `0,1,3` to skip avatar items). From the **Metadata Downloader** folder: `python steps/1-collect.py -o path/to/output.csv --categories 0,1,3 ...` (see [Metadata Downloader/README.md](Metadata%20Downloader/README.md) for full options).
 
 
-If you do not remove the `"-1":"all"` category, you will STILL DOWNLOAD ALL ASSETS for that category. If you remove subcategories, it is **recommended** to remove the all subcategory as well. It keep it as a fallback to make sure you get everything, but it *significantly* increases the time step 4 takes to complete.
+> If you do not **remove the `"-1":"all"` category**, you will STILL DOWNLOAD ALL ASSETS for that category. If you remove subcategories, it is **recommended** to remove the all subcategory as well. It keep it as a fallback to make sure you get everything, but it *significantly* increases the time step 4 takes to complete.
 ---
 
 ### Step 4 — Download the resource catalog
@@ -136,14 +136,14 @@ This step reads the catalog (from Step 4) and the cache (from Step 5) and extrac
 .\run-extraction.ps1
 ```
 
-3. Follow the prompts — the script auto-detects missing tools (Node.js, DuckDB, sqlite3, npm packages) and offers to install them:
+3. Follow the prompts — the script auto-detects missing tools (Node.js, DuckDB, npm packages) and offers to install them:
    - **Run in test mode?** — Choose **Y** for your first run (recommended) or **N** for a full run.
-   - **Output format** — Choose **1** (SQLite), **2** (CSV only), or **3** (both).
+   - **Output format** — Choose **1** (PGLite), **2** (CSV only), or **3** (both).
 4. Wait for completion. Output is in **asset-extraction/output/**:
    - `images/` — extracted sprites and clip frames
    - `audio/` — extracted audio clips
    - `thumbs/` — generated thumbnails
-   - **metadata.db** — SQLite database with all asset metadata
+   - **metadata/** — PGLite database directory with all asset metadata
    - `staging/` — intermediate CSVs
 
 ---
@@ -187,7 +187,7 @@ To get the path: in File Explorer, open your workspace folder → click the addr
 
 ### Pipeline overview
 
-**Entry:** `asset-extraction/run-asset-extraction.ps1`. **Input:** **RootDesk/MyDesk/resources.csv** (from Step 4). **Cache:** `%LOCALAPPDATA%\..\LocalLow\nexon\MapleStory Worlds\resource_cache` (override with `-CacheDir` on step scripts). **Output:** `output/images/`, `output/audio/`, `output/thumbs/`, `output/metadata.db`; staging CSVs in `output/staging/`.
+**Entry:** `asset-extraction/run-asset-extraction.ps1`. **Input:** **RootDesk/MyDesk/resources.csv** (from Step 4). **Cache:** `%LOCALAPPDATA%\..\LocalLow\nexon\MapleStory Worlds\resource_cache` (override with `-CacheDir` on step scripts). **Output:** `output/images/`, `output/audio/`, `output/thumbs/`, `output/metadata/` (PGLite data dir); staging CSVs in `output/staging/`.
 
 **7 internal steps:** (1) Build catalog → staging. (2) Enrich with cache index. (3) Extract sprites + audio. (4) Build enc map for clips. (5) Extract clip frames. (6) Build final DB (and/or final CSVs). (7) Build thumbnails. Full details: [asset-extraction/README.md](asset-extraction/README.md).
 
@@ -206,7 +206,7 @@ npm install
 | Path | Purpose |
 |------|--------|
 | Catalog | **RootDesk/MyDesk/resources.csv** (from Step 4); read automatically. |
-| **output/** | Final result: images/, audio/, thumbs/, metadata.db, staging/. |
+| **output/** | Final result: images/, audio/, thumbs/, metadata/ (PGLite), staging/. |
 | **output-test/**, **temp-test/** | Used only with **-Test**; main output/ and temp/ are unchanged. |
 | **temp/** | Staging during extraction (e.g. offsets). |
 | **logs/** | Pipeline and per-step logs. |
@@ -221,8 +221,8 @@ npm install
 | **-StartAtStep N** | Run steps N through 7 (1–7). |
 | **-OnlyStep N** | Run only step N (1–7). |
 | **-AssetExtractionRoot "path"** | Use this folder as asset-extraction root (default: script directory). |
-| **-NonInteractive** | No prompts; use RootDesk/MyDesk/resources.csv; output format defaults to SQLite. |
-| **-OutputFormat sqlite \| csv \| both** | **sqlite** = metadata.db only (default). **csv** = 5 final_*.csv only; step 7 skipped. **both** = DB + CSVs. |
+| **-NonInteractive** | No prompts; use RootDesk/MyDesk/resources.csv; output format defaults to PGLite. |
+| **-OutputFormat pglite \| csv \| both** | **pglite** = metadata/ directory only (default). **csv** = 5 final_*.csv only; step 7 skipped. **both** = DB + CSVs. |
 
 **Examples**
 

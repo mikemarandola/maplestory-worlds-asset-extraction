@@ -1,10 +1,9 @@
-# Helper: Extract sprites (images) and audio from the cache. Used by DuckDB pipeline step 3 and (when run from archive) legacy step 4.
+# Helper: Extract sprites (images) and audio from the cache. Used by DuckDB pipeline step 3.
 # One output PNG per image RUID (dedupe by ruid, output_subdir). Sprites -> dds-to-png-batch.js; damageskin/avataritem/atlas -> extract-image-batch.js; audioclips -> OGG.
-# DB path: reads catalog_enriched from output/metadata.db; writes offset_x, offset_y back to DB. CSV path (DuckDB): -ExtractListCsv + -StagingOnly.
+# CSV path (DuckDB): -ExtractListCsv + -StagingOnly.
 
 param(
-    [string] $DbPath = "",        # default: output/metadata.db (required unless ExtractListCsv is set)
-    [string] $ExtractListCsv = "", # DuckDB pipeline: use this CSV instead of DB stream (then CacheDir required)
+    [string] $ExtractListCsv = "", # DuckDB pipeline: CSV extract list (required; CacheDir also required)
     [string] $CacheDir = "",     # default: current user's MSW cache (see _get-msw-cache-dir.ps1)
     [string] $OutDir = "",       # default: asset-extraction/output/images
     [string] $AudioOutDir = "", # default: asset-extraction/output/audio; audioclips -> <Category>/<Subcategory>/<ruid>.ogg
@@ -31,9 +30,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 . (Join-Path $scriptRoot "_get-parallelism.ps1")
 . (Join-Path $scriptRoot "_get-msw-cache-dir.ps1")
 $outputDirBase = if ($env:ASSET_EXTRACTION_OUTPUT_DIR) { $env:ASSET_EXTRACTION_OUTPUT_DIR } else { Join-Path $assetExtRoot "output" }
-$metadataDb = if ([string]::IsNullOrEmpty($DbPath)) { Join-Path $outputDirBase "metadata.db" } else { $DbPath }
-$useCsvStream = -not [string]::IsNullOrEmpty($ExtractListCsv)
-if (-not $useCsvStream -and -not (Test-Path $metadataDb)) { Write-Error "metadata.db not found: $metadataDb (run steps 1 and 2 first, or pass -ExtractListCsv)."; exit 1 }
+if ([string]::IsNullOrEmpty($ExtractListCsv)) { Write-Error "ExtractListCsv is required. Pass -ExtractListCsv <path>."; exit 1 }
 if ([string]::IsNullOrEmpty($CacheDir)) { $CacheDir = $MSWCacheDir }
 if ([string]::IsNullOrEmpty($OutDir)) {
     $OutDir = Join-Path $outputDirBase "images"
@@ -48,18 +45,15 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Forc
 if (-not (Test-Path $AudioOutDir)) { New-Item -ItemType Directory -Path $AudioOutDir -Force | Out-Null }
 if (-not (Test-Path $tempDir)) { New-Item -ItemType Directory -Path $tempDir -Force | Out-Null }
 $helperDir = Join-Path $assetExtRoot "scripts\Asset Extraction Pipeline\helper-scripts"
-$streamCatalogScript = Join-Path $helperDir "stream-catalog-enriched-for-extract.js"
-$updateOffsetsScript = Join-Path $helperDir "update-catalog-offsets.js"
 $cacheRoot = if (Test-Path $CacheDir) { (Resolve-Path $CacheDir).Path.TrimEnd('\', '/') } else { $null }
 if (-not $cacheRoot) { Write-Error "Cache dir not found: $CacheDir"; exit 1 }
 $BatchSize = if ($BatchSize -gt 0) { $BatchSize } else { [Math]::Max(50, [Math]::Min(200, 25 * [Math]::Max(1, [Environment]::ProcessorCount))) }
-Write-Host "DB: $metadataDb. Cache root: $cacheRoot"
+Write-Host "Cache root: $cacheRoot"
 $batchScript = Join-Path $helperDir "dds-to-png-batch.js"
 $otherImageBatchScript = Join-Path $helperDir "extract-image-batch.js"
 $appDir = $assetExtRoot
 if (-not (Test-Path $batchScript)) { Write-Error "Batch script not found: $batchScript (need dds-to-png-batch.js)"; exit 1 }
 if (-not (Test-Path $otherImageBatchScript)) { Write-Error "extract-image-batch.js not found: $otherImageBatchScript"; exit 1 }
-# streamCatalogScript and updateOffsetsScript are only required when using DB stream / flush (not for DuckDB CSV + StagingOnly); checked where used.
 
 # Resolve which asset types to extract. Image types: sprite, damageskin, avataritem, atlas. Audio: audioclip.
 $validTypes = @("sprite", "audioclip", "damageskin", "avataritem", "atlas")
@@ -398,17 +392,10 @@ $spriteChunkNum = 0
 $otherChunkNum = 0
 $audioChunkNum = 0
 $assetTypesArg = @($extractTypes) -join ','
-if ($useCsvStream) {
-    $streamFromCsvScript = Join-Path $helperDir "stream-from-csv.js"
-    if (-not (Test-Path $streamFromCsvScript)) { Write-Error "stream-from-csv.js not found: $streamFromCsvScript"; exit 1 }
-    $streamArgs = @($streamFromCsvScript, "--input-csv", $ExtractListCsv, "--cache-dir", $cacheRoot)
-    Write-Host "Streaming extract list from CSV (chunk size $workListChunkSize)..."
-} else {
-    if (-not (Test-Path $streamCatalogScript)) { Write-Error "stream-catalog-enriched-for-extract.js not found: $streamCatalogScript (use -ExtractListCsv for DuckDB pipeline)"; exit 1 }
-    $streamArgs = @($streamCatalogScript, "--db", $metadataDb, "--cache-dir", $cacheRoot, "--asset-types", $assetTypesArg)
-    if ($Test) { $streamArgs += "--test" }
-    Write-Host "Streaming catalog_enriched from DB (chunk size $workListChunkSize)..."
-}
+$streamFromCsvScript = Join-Path $helperDir "stream-from-csv.js"
+if (-not (Test-Path $streamFromCsvScript)) { Write-Error "stream-from-csv.js not found: $streamFromCsvScript"; exit 1 }
+$streamArgs = @($streamFromCsvScript, "--input-csv", $ExtractListCsv, "--cache-dir", $cacheRoot)
+Write-Host "Streaming extract list from CSV (chunk size $workListChunkSize)..."
 [Console]::Out.Flush()
 $lineNum = 0
 & node $streamArgs 2>&1 | ForEach-Object {
@@ -529,19 +516,6 @@ if ($StagingOnly) {
         Set-Content -Path $stagingPath -Value $null -Encoding UTF8
     }
     Write-Host "Extract (StagingOnly): Wrote $($offsetRowsForDb.Count) offset row(s) to $stagingPath"
-} elseif ($offsetRowsForDb.Count -gt 0) {
-        if (-not (Test-Path $updateOffsetsScript)) { Write-Error "update-catalog-offsets.js not found: $updateOffsetsScript (use -StagingOnly for DuckDB pipeline)"; exit 1 }
-        Write-Host "Extract: Flushing offsets to DB ($($offsetRowsForDb.Count) rows)..."
-        [Console]::Out.Flush()
-        $offsetsTemp = [System.IO.Path]::GetTempFileName()
-        try {
-            $offsetRowsForDb | ForEach-Object { @{ ruid = $_.ruid; output_subdir = $_.output_subdir; offset_x = $_.offset_x; offset_y = $_.offset_y } | ConvertTo-Json -Compress } | Set-Content $offsetsTemp -Encoding UTF8
-            & node $updateOffsetsScript --db $metadataDb --input $offsetsTemp
-            if ($LASTEXITCODE -ne 0) { Write-Warning "update-catalog-offsets.js exited with $LASTEXITCODE" }
-            else { Write-Host "Updated catalog_enriched with $($offsetRowsForDb.Count) offset row(s)." }
-        } finally {
-            if (Test-Path $offsetsTemp) { Remove-Item $offsetsTemp -Force -ErrorAction SilentlyContinue }
-        }
 }
 
 if ($audioChunk.Count -gt 0) {

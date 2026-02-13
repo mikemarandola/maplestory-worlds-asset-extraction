@@ -1,9 +1,8 @@
 /**
- * Step 5b: Read animationclip rows from catalog_enriched (or --clip-list-csv), load enc_key->ruid (or --enc-ruid-map-csv),
- * parse each clip .mod, write animation_frames (DB) or frame_index.csv (--out-csv). When --out-csv set, CSV mode (DuckDB pipeline).
+ * Step 5b: Read animationclip rows from --clip-list-csv, load enc_key->ruid from --enc-ruid-map-csv,
+ * parse each clip .mod, write frame_index.csv to --out-csv. CSV mode only (DuckDB pipeline).
  *
- * Usage: node extract-clip-frames-db.js --db <path> --cache-dir <path> [--test] [--concurrency N]
- *        node extract-clip-frames-db.js --clip-list-csv <path> --enc-ruid-map-csv <path> --out-csv <path> --cache-dir <path> [--test] [--concurrency N]
+ * Usage: node extract-clip-frames-db.js --clip-list-csv <path> --enc-ruid-map-csv <path> --out-csv <path> --cache-dir <path> [--test] [--concurrency N]
  */
 const fs = require('fs');
 const fsPromises = require('fs').promises;
@@ -24,10 +23,9 @@ const DEFAULT_CONCURRENCY = Math.max(1, Math.min(32, Math.floor(((os.cpus && os.
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const out = { db: null, cacheDir: null, clipListCsv: null, encRuidMapCsv: null, outCsv: null, test: false, concurrency: DEFAULT_CONCURRENCY };
+  const out = { cacheDir: null, clipListCsv: null, encRuidMapCsv: null, outCsv: null, test: false, concurrency: DEFAULT_CONCURRENCY };
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--db' && args[i + 1]) out.db = args[++i];
-    else if (args[i] === '--cache-dir' && args[i + 1]) out.cacheDir = args[++i];
+    if (args[i] === '--cache-dir' && args[i + 1]) out.cacheDir = args[++i];
     else if (args[i] === '--clip-list-csv' && args[i + 1]) out.clipListCsv = args[++i];
     else if (args[i] === '--enc-ruid-map-csv' && args[i + 1]) out.encRuidMapCsv = args[++i];
     else if (args[i] === '--out-csv' && args[i + 1]) out.outCsv = args[++i];
@@ -282,127 +280,13 @@ function parseClipToRows(clip, buf, encMap) {
 }
 
 async function mainAsync() {
-  const { db: dbPath, cacheDir, clipListCsv, encRuidMapCsv, outCsv, test, concurrency } = parseArgs();
+  const { cacheDir, clipListCsv, encRuidMapCsv, outCsv, test, concurrency } = parseArgs();
   if (clipListCsv && encRuidMapCsv && outCsv && cacheDir) {
     await runCsvMode(clipListCsv, encRuidMapCsv, outCsv, cacheDir, test, concurrency);
     return;
   }
-  if (!dbPath || !cacheDir) {
-    process.stderr.write('Usage: node extract-clip-frames-db.js --db <path> --cache-dir <path> [--test] [--concurrency N]\n');
-    process.stderr.write('   or: node extract-clip-frames-db.js --clip-list-csv <path> --enc-ruid-map-csv <path> --out-csv <path> --cache-dir <path> [--test]\n');
-    process.exit(1);
-  }
-  const Database = require('better-sqlite3');
-  const db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  const cacheRoot = path.resolve(cacheDir).replace(/[/\\]+$/, '');
-
-  const encMap = new Map();
-  for (const r of db.prepare('SELECT enc_key, ruid FROM catalog_enriched WHERE enc_key IS NOT NULL').all()) {
-    const k = (r.enc_key || '').trim().toLowerCase();
-    if (k) encMap.set(k, (r.ruid || '').trim());
-  }
-  process.stderr.write(`Enc map: ${encMap.size} entries.\n`);
-
-  const clipLimit = test ? 50 : null;
-  process.stderr.write(`Clips: streaming (no row limit when not --test), concurrency: ${concurrency}\n`);
-
-  db.exec(`
-    DROP TABLE IF EXISTS animation_frames;
-    CREATE TABLE animation_frames (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      clip_ruid TEXT NOT NULL,
-      frame_index INTEGER NOT NULL,
-      frame_ruid TEXT NOT NULL,
-      frame_duration_ms INTEGER NOT NULL,
-      image_path TEXT,
-      offset_x REAL,
-      offset_y REAL,
-      UNIQUE(clip_ruid, frame_index)
-    );
-  `);
-  const insert = db.prepare(`
-    INSERT INTO animation_frames (clip_ruid, frame_index, frame_ruid, frame_duration_ms, image_path, offset_x, offset_y)
-    VALUES (?, ?, ?, ?, NULL, NULL, NULL)
-  `);
-  const runBatch = db.transaction((rows) => {
-    for (const r of rows) insert.run(r.clip_ruid, r.frame_number, r.frame_ruid, r.frame_duration_ms);
-  });
-
-  const batch = [];
-  let processed = 0;
-  const PROGRESS_INTERVAL_MS = 30000;
-  let lastProgressTime = Date.now();
-
-  if (concurrency <= 1) {
-    const clipStmt = db.prepare(`
-      SELECT ruid, relative_path, suffix
-      FROM catalog_enriched
-      WHERE LOWER(TRIM(asset_type)) = 'animationclip'
-      ORDER BY rowid
-    `);
-    for (const clip of clipStmt.iterate()) {
-      if (clipLimit != null && processed >= clipLimit) break;
-      const fullPath = path.join(cacheRoot, (clip.relative_path || '').replace(/\//g, path.sep));
-      if (!fs.existsSync(fullPath)) continue;
-      let buf;
-      try { buf = fs.readFileSync(fullPath); } catch (_) { continue; }
-      const rows = parseClipToRows(clip, buf, encMap);
-      for (const r of rows) {
-        batch.push(r);
-        if (batch.length >= BATCH) { runBatch(batch); batch.length = 0; }
-      }
-      processed++;
-      const now = Date.now();
-      if (processed % 500 === 0 || now - lastProgressTime >= PROGRESS_INTERVAL_MS) {
-        process.stderr.write(`progress: clip frames - clip ${processed} processed\n`);
-        lastProgressTime = now;
-      }
-    }
-  } else {
-    // Concurrency > 1: read all clip rows into memory first so we never hold
-    // a DB iterator open across await (avoids "connection is busy").
-    const clipQuery = clipLimit != null
-      ? db.prepare(`
-          SELECT ruid, relative_path, suffix
-          FROM catalog_enriched
-          WHERE LOWER(TRIM(asset_type)) = 'animationclip'
-          ORDER BY rowid
-          LIMIT ?
-        `)
-      : db.prepare(`
-          SELECT ruid, relative_path, suffix
-          FROM catalog_enriched
-          WHERE LOWER(TRIM(asset_type)) = 'animationclip'
-          ORDER BY rowid
-        `);
-    const allClips = clipLimit != null ? clipQuery.all(clipLimit) : clipQuery.all();
-    for (let i = 0; i < allClips.length; i += concurrency) {
-      const chunk = allClips.slice(i, i + concurrency);
-      const paths = chunk.map(c => path.join(cacheRoot, (c.relative_path || '').replace(/\//g, path.sep)));
-      const bufs = await Promise.all(paths.map(p => fsPromises.readFile(p).catch(() => null)));
-      for (let j = 0; j < chunk.length; j++) {
-        if (!bufs[j]) continue;
-        const rows = parseClipToRows(chunk[j], bufs[j], encMap);
-        for (const r of rows) {
-          batch.push(r);
-          if (batch.length >= BATCH) { runBatch(batch); batch.length = 0; }
-        }
-        processed++;
-      }
-      const now = Date.now();
-      if (processed % 500 < concurrency || now - lastProgressTime >= PROGRESS_INTERVAL_MS) {
-        process.stderr.write(`progress: clip frames - clip ${processed} processed\n`);
-        lastProgressTime = now;
-      }
-    }
-    if (processed % 500 > 0 || processed === 0) process.stderr.write(`  ${processed} clips\n`);
-  }
-
-  if (batch.length > 0) runBatch(batch);
-  process.stderr.write(`Step 5b done. animation_frames (clip/frame/ruid/duration) written.\n`);
-  db.close();
+  process.stderr.write('Usage: node extract-clip-frames-db.js --clip-list-csv <path> --enc-ruid-map-csv <path> --out-csv <path> --cache-dir <path> [--test] [--concurrency N]\n');
+  process.exit(1);
 }
 
 mainAsync().catch(err => {

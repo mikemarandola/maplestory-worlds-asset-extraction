@@ -1,9 +1,8 @@
 /**
- * Step 5a helper: Read sprite .win/.dxt rows from catalog_enriched (or --input-csv), read .mod files (bytes 3-18 = enc),
- * batch UPDATE catalog_enriched.enc_key (or write --out-csv). When --input-csv and --out-csv are set, CSV mode (DuckDB pipeline).
+ * Step 5a helper: Read sprite .win/.dxt rows from --input-csv, read .mod files (bytes 3-18 = enc),
+ * write enc_key map to --out-csv. CSV mode only (DuckDB pipeline).
  *
- * Usage: node build-enc-map-db.js --db <path> --cache-dir <path> [--test] [--concurrency N]
- *        node build-enc-map-db.js --input-csv <path> --out-csv <path> --cache-dir <path> [--test] [--concurrency N]
+ * Usage: node build-enc-map-db.js --input-csv <path> --out-csv <path> --cache-dir <path> [--test] [--concurrency N]
  */
 const fs = require('fs');
 const fsPromises = require('fs').promises;
@@ -24,26 +23,15 @@ const DEFAULT_CONCURRENCY = Math.max(1, Math.min(32, Math.floor(((os.cpus && os.
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const out = { db: null, cacheDir: null, inputCsv: null, outCsv: null, test: false, concurrency: DEFAULT_CONCURRENCY };
+  const out = { cacheDir: null, inputCsv: null, outCsv: null, test: false, concurrency: DEFAULT_CONCURRENCY };
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--db' && args[i + 1]) out.db = args[++i];
-    else if (args[i] === '--cache-dir' && args[i + 1]) out.cacheDir = args[++i];
+    if (args[i] === '--cache-dir' && args[i + 1]) out.cacheDir = args[++i];
     else if (args[i] === '--input-csv' && args[i + 1]) out.inputCsv = args[++i];
     else if (args[i] === '--out-csv' && args[i + 1]) out.outCsv = args[++i];
     else if (args[i] === '--test') out.test = true;
     else if (args[i] === '--concurrency' && args[i + 1]) out.concurrency = Math.max(1, parseInt(args[++i], 10) || 1);
   }
   return out;
-}
-
-function processOne(cacheRoot, r) {
-  const fullPath = path.join(cacheRoot, (r.relative_path || '').replace(/\//g, path.sep));
-  let encKey = null;
-  try {
-    const buf = fs.readFileSync(fullPath);
-    if (buf.length >= 19) encKey = buf.slice(3, 19).toString('hex').toLowerCase();
-  } catch (_) {}
-  return encKey ? { rowid: r.rowid, encKey, ruid: r.ruid } : null;
 }
 
 async function processChunkAsync(cacheRoot, chunk) {
@@ -138,85 +126,13 @@ async function runCsvMode(inputCsv, outCsv, cacheDir, test, concurrency) {
 }
 
 async function mainAsync() {
-  const { db: dbPath, cacheDir, inputCsv, outCsv, test, concurrency } = parseArgs();
+  const { cacheDir, inputCsv, outCsv, test, concurrency } = parseArgs();
   if (inputCsv && outCsv && cacheDir) {
     await runCsvMode(inputCsv, outCsv, cacheDir, test, concurrency);
     return;
   }
-  if (!dbPath || !cacheDir) {
-    process.stderr.write('Usage: node build-enc-map-db.js --db <path> --cache-dir <path> [--test] [--concurrency N]\n');
-    process.stderr.write('   or: node build-enc-map-db.js --input-csv <path> --out-csv <path> --cache-dir <path> [--test]\n');
-    process.exit(1);
-  }
-  const Database = require('better-sqlite3');
-  const db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  const cacheRoot = path.resolve(cacheDir).replace(/[/\\]+$/, '');
-
-  const stmt = db.prepare(`
-    SELECT rowid, ruid, relative_path
-    FROM catalog_enriched
-    WHERE LOWER(TRIM(asset_type)) = 'sprite' AND LOWER(TRIM(suffix)) IN ('win', 'dxt')
-    ORDER BY rowid
-  `);
-  const rowLimit = test ? 50 : null;
-  process.stderr.write(`Step 5a: Building enc_key for sprite .win/.dxt rows (concurrency: ${concurrency}, no row limit when not --test)...\n`);
-  const update = db.prepare('UPDATE catalog_enriched SET enc_key = ? WHERE rowid = ?');
-  const runBatch = db.transaction((pairs) => {
-    for (const p of pairs) update.run(p.encKey, p.rowid);
-  });
-
-  // When concurrency > 1, we must not hold stmt.iterate() open across await (connection stays busy).
-  // So read all rows into memory first, then process in parallel chunks; connection is free during await.
-  const allRows = rowLimit != null
-    ? db.prepare(`
-        SELECT rowid, ruid, relative_path
-        FROM catalog_enriched
-        WHERE LOWER(TRIM(asset_type)) = 'sprite' AND LOWER(TRIM(suffix)) IN ('win', 'dxt')
-        ORDER BY rowid LIMIT ?
-      `).all(rowLimit)
-    : stmt.all();
-
-  const batch = [];
-  let done = 0;
-  const PROGRESS_INTERVAL_MS = 30000;
-  let lastProgressTime = Date.now();
-
-  if (concurrency <= 1) {
-    for (const r of allRows) {
-      const p = processOne(cacheRoot, r);
-      if (p) {
-        batch.push(p);
-        if (batch.length >= BATCH) { runBatch(batch); batch.length = 0; }
-      }
-      done++;
-      const now = Date.now();
-      if (done % 5000 === 0 || now - lastProgressTime >= PROGRESS_INTERVAL_MS) {
-        process.stderr.write(`progress: enc map - row ${done} of catalog_enriched\n`);
-        lastProgressTime = now;
-      }
-    }
-  } else {
-    for (let i = 0; i < allRows.length; i += concurrency) {
-      const chunk = allRows.slice(i, i + concurrency);
-      const results = await processChunkAsync(cacheRoot, chunk);
-      for (const p of results) {
-        batch.push(p);
-        if (batch.length >= BATCH) { runBatch(batch); batch.length = 0; }
-      }
-      done += chunk.length;
-      const now = Date.now();
-      if (done % 5000 < concurrency || now - lastProgressTime >= PROGRESS_INTERVAL_MS) {
-        process.stderr.write(`progress: enc map - row ${done} of catalog_enriched\n`);
-        lastProgressTime = now;
-      }
-    }
-    if (done % 5000 > 0 || done === 0) process.stderr.write(`  ${done} rows\n`);
-  }
-  if (batch.length > 0) runBatch(batch);
-  process.stderr.write(`  enc_key updated for sprite rows. Done.\n`);
-  db.close();
+  process.stderr.write('Usage: node build-enc-map-db.js --input-csv <path> --out-csv <path> --cache-dir <path> [--test] [--concurrency N]\n');
+  process.exit(1);
 }
 
 mainAsync().catch(err => {

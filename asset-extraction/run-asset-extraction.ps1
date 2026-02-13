@@ -13,8 +13,8 @@ param(
     [int] $StartAtStep = 1,
     [int] $OnlyStep = 0,
     [switch] $NonInteractive,
-    [ValidateSet("sqlite", "csv", "both", "")]
-    [string] $OutputFormat = ""  # default: prompt (or sqlite when -NonInteractive). sqlite = metadata.db; csv = final_*.csv only; both = both
+    [ValidateSet("pglite", "csv", "both", "")]
+    [string] $OutputFormat = ""  # default: prompt (or pglite when -NonInteractive). pglite = metadata dir; csv = final_*.csv only; both = both
 )
 
 $ErrorActionPreference = "Stop"
@@ -92,8 +92,7 @@ function Refresh-EnvPath {
 #   1. PowerShell 7+     winget: Microsoft.PowerShell
 #   2. Node.js (LTS)    winget: OpenJS.NodeJS.LTS  (includes npm)
 #   3. DuckDB CLI       winget: DuckDB.cli
-#   4. sqlite3 CLI      winget: SQLite.SQLite
-#   5. npm packages     node_modules via npm install (sharp, parse-dds, decode-dxt, papaparse, better-sqlite3)
+#   4. npm packages     node_modules via npm install (sharp, parse-dds, decode-dxt, papaparse, @electric-sql/pglite)
 
 # --- 1. PowerShell 7+ (required) ---
 $psMajor = $PSVersionTable.PSVersion.Major
@@ -158,33 +157,13 @@ if (-not $duckdbExe) {
     }
 }
 
-# --- 4. sqlite3 CLI (required for step 6) ---
-$sqlite3Exe = Get-Command sqlite3 -ErrorAction SilentlyContinue
-if (-not $sqlite3Exe) {
-    $installed = Invoke-InstallPrompt -Name "sqlite3 CLI" -InstallCommand "winget install -e --id SQLite.SQLite --accept-package-agreements" -ManualUrl "https://sqlite.org/download.html"
-    if (-not $installed) {
-        Write-Error "sqlite3 CLI is required for step 6. Install: winget install SQLite.SQLite or https://sqlite.org/download.html"
-        exit 1
-    }
-    Refresh-EnvPath
-    $sqlite3Exe = Get-Command sqlite3 -ErrorAction SilentlyContinue
-    if (-not $sqlite3Exe) {
-        if ($NonInteractive) {
-            Write-Error "sqlite3 CLI was installed but is not yet in PATH. Close and reopen the terminal, then run this script again."
-        } else {
-            Write-Host "SQLite was installed. If 'sqlite3' is not found, close and reopen the terminal, then run this script again."
-        }
-        exit ($NonInteractive ? 1 : 0)
-    }
-}
-
-# --- 5. package.json and npm dependencies ---
+# --- 4. package.json and npm dependencies ---
 if (-not (Test-Path $packageJson)) {
     Write-Error "package.json not found at: $packageJson. Run from asset-extraction root or pass -AssetExtractionRoot."
     exit 1
 }
 $nodeModules = Join-Path $HomeDir "node_modules"
-$keyDeps = @("sharp", "parse-dds", "decode-dxt", "papaparse", "better-sqlite3")
+$keyDeps = @("sharp", "parse-dds", "decode-dxt", "papaparse", "@electric-sql/pglite")
 $missingDeps = @($keyDeps | Where-Object { -not (Test-Path (Join-Path $nodeModules $_)) })
 if ($missingDeps.Count -gt 0) {
     $doInstall = $false
@@ -267,39 +246,39 @@ if ($Test) {
     }
 }
 
-# Final output format: SQLite DB or CSV per table (prompt unless -OutputFormat or -NonInteractive)
+# Final output format: PGLite DB or CSV per table (prompt unless -OutputFormat or -NonInteractive)
 if ([string]::IsNullOrWhiteSpace($OutputFormat)) {
     if ($NonInteractive) {
-        $OutputFormat = "sqlite"
+        $OutputFormat = "pglite"
     } else {
         Write-Host "Final output format:"
-        Write-Host "  1 = SQLite DB (output/metadata.db)"
-        Write-Host "  2 = CSV per table (output/staging/final_*.csv only; no metadata.db)"
-        Write-Host "  3 = Both (metadata.db and final_*.csv)"
+        Write-Host "  1 = PGLite DB (output/metadata/)"
+        Write-Host "  2 = CSV per table (output/staging/final_*.csv only; no metadata DB)"
+        Write-Host "  3 = Both (PGLite metadata/ and final_*.csv)"
         $r = Read-Host "Choice (1, 2, or 3) [1]"
-        if ([string]::IsNullOrWhiteSpace($r) -or $r -eq "1") { $OutputFormat = "sqlite" }
+        if ([string]::IsNullOrWhiteSpace($r) -or $r -eq "1") { $OutputFormat = "pglite" }
         elseif ($r -eq "2") { $OutputFormat = "csv" }
         elseif ($r -eq "3") { $OutputFormat = "both" }
-        else { $OutputFormat = "sqlite" }
+        else { $OutputFormat = "pglite" }
     }
 }
 $env:ASSET_EXTRACTION_OUTPUT_FORMAT = $OutputFormat
 
-# FTS5 trigram prompt: fast wildcard tag search (only relevant when building a DB)
-$enableFts5 = $false
+# pg_trgm trigram prompt: fast wildcard tag search (only relevant when building a DB)
+$enableTrigram = $false
 if ($OutputFormat -ne "csv") {
     if ($NonInteractive) {
-        $enableFts5 = $true
+        $enableTrigram = $true
     } else {
         Write-Host ""
         Write-Host "Tag search mode (for the metadata DB):"
         Write-Host "  1 = Prefix only  (e.g. 'sword...' — fast with standard indexes, no extra DB size)"
-        Write-Host "  2 = Full wildcard (e.g. '...sword...' — uses FTS5 trigram index; adds ~1-3 GB to DB)"
+        Write-Host "  2 = Full wildcard (e.g. '...sword...' — uses pg_trgm GIN trigram index; adds up to 15 GB to DB)"
         $r = Read-Host "Choice (1 or 2) [2]"
-        $enableFts5 = ($r -ne "1")
+        $enableTrigram = ($r -ne "1")
     }
 }
-$env:ASSET_EXTRACTION_FTS5_TRIGRAM = if ($enableFts5) { "1" } else { "0" }
+$env:ASSET_EXTRACTION_TRIGRAM = if ($enableTrigram) { "1" } else { "0" }
 
 # Confirm before running unless -NonInteractive (avoids accidentally overwriting output/ on normal run)
 if (-not $NonInteractive) {
@@ -316,8 +295,8 @@ $runOnlyOneStep = ($OnlyStep -ge 1 -and $OnlyStep -le 7)
 if ($runOnlyOneStep) { $StartAtStep = $OnlyStep }
 
 Write-Host "Asset extraction pipeline (7 steps). Home: $HomeDir"
-$fts5Label = if ($enableFts5) { "yes" } else { "no" }
-Write-Host "Test=$Test SkipExisting=$SkipExisting Workers=$effectiveWorkers OutputFormat=$OutputFormat Fts5Trigram=$fts5Label"
+$trigramLabel = if ($enableTrigram) { "yes" } else { "no" }
+Write-Host "Test=$Test SkipExisting=$SkipExisting Workers=$effectiveWorkers OutputFormat=$OutputFormat Trigram=$trigramLabel"
 if ($runOnlyOneStep) { Write-Host "OnlyStep: $OnlyStep" }
 elseif ($StartAtStep -gt 1) { Write-Host "StartAtStep: $StartAtStep" }
 if ($chosenCsv) { Write-Host "Catalog CSV: $([System.IO.Path]::GetFileName($chosenCsv))" }
@@ -352,7 +331,7 @@ $header = @"
 ================================================================================
 Asset extraction pipeline (7 steps) - $logTimestamp
 Started: $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-Test=$Test SkipExisting=$SkipExisting Workers=$effectiveWorkers Fts5Trigram=$enableFts5
+Test=$Test SkipExisting=$SkipExisting Workers=$effectiveWorkers Trigram=$enableTrigram
 StartAtStep=$StartAtStep OnlyStep=$OnlyStep (steps: $($stepsToRun.Count))
 ================================================================================
 
@@ -373,9 +352,9 @@ foreach ($s in $stepsToRun) {
     Add-Content -Path $pipelineLogPath -Value "`n$stepLogHeader" -Encoding UTF8 -NoNewline
     Set-Content -Path $stepLogPath -Value $stepLogHeader -Encoding UTF8 -NoNewline
 
-    # Step 7 requires metadata.db; skip only when output format is CSV (not sqlite or both)
+    # Step 7 requires metadata dir; skip only when output format is CSV (not pglite or both)
     if ($s.N -eq 7 -and $OutputFormat -eq "csv") {
-        Write-Host "Step 7 skipped (output format is CSV per table; thumbnails require metadata.db)."
+        Write-Host "Step 7 skipped (output format is CSV per table; thumbnails require metadata DB)."
         $stepNumStr = $s.N.ToString('00')
         $stepLogPath = Join-Path $logsDir "step$stepNumStr-$logTimestamp.log"
         $skipMsg = "=== Step 7: Build thumbnails === (skipped; OutputFormat=csv)`n"
@@ -388,11 +367,11 @@ foreach ($s in $stepsToRun) {
     foreach ($k in $commonArgs.Keys) { $allParams[$k] = $commonArgs[$k] }
     foreach ($k in $s.Extra.Keys) { $allParams[$k] = $s.Extra[$k] }
     if ($s.N -eq 1 -and $chosenCsv) { $allParams["CsvPath"] = $chosenCsv }
-    if ($s.N -eq 6) { $allParams["OutputFormat"] = $OutputFormat; if ($enableFts5) { $allParams["EnableFts5"] = $true } }
+    if ($s.N -eq 6) { $allParams["OutputFormat"] = $OutputFormat; if ($enableTrigram) { $allParams["EnableTrigram"] = $true } }
     # When not Test, point steps 6 and 7 at real output; when Test they use env ASSET_EXTRACTION_OUTPUT_DIR
     if (-not $Test) {
-        if ($s.N -eq 6) { $allParams["OutDb"] = Join-Path $HomeDir "output\metadata.db" }
-        if ($s.N -eq 7) { $allParams["OutDb"] = Join-Path $HomeDir "output\metadata.db" }
+        if ($s.N -eq 6) { $allParams["OutDb"] = Join-Path $HomeDir "output\metadata" }
+        if ($s.N -eq 7) { $allParams["OutDb"] = Join-Path $HomeDir "output\metadata" }
     }
 
     Push-Location $HomeDir

@@ -1,4 +1,4 @@
-# Step 7: Build thumbnails. Reads from final metadata.db (or staging). Calls existing build-thumbs helper.
+# Step 7: Build thumbnails. Reads from final PGLite metadata dir (or staging). Calls existing build-thumbs helper.
 
 param(
     [string] $OutDb = "",
@@ -20,12 +20,12 @@ $scriptsDir = Join-Path $assetExtRoot "scripts"
 . (Join-Path $scriptsDir "Asset Extraction Pipeline\helper-scripts\_get-parallelism.ps1")
 $outputDirBase = if ($env:ASSET_EXTRACTION_OUTPUT_DIR) { $env:ASSET_EXTRACTION_OUTPUT_DIR } else { Join-Path $assetExtRoot "output" }
 $outputDirActual = if ([string]::IsNullOrEmpty($OutputDir)) { $outputDirBase } else { $OutputDir }
-$metadataDb = if ([string]::IsNullOrEmpty($OutDb)) { Join-Path $outputDirActual "metadata.db" } else { $OutDb }
+$metadataDb = if ([string]::IsNullOrEmpty($OutDb)) { Join-Path $outputDirActual "metadata" } else { $OutDb }
 $imagesDirActual = if ([string]::IsNullOrEmpty($ImagesDir)) { Join-Path $outputDirActual "images" } else { $ImagesDir }
 $thumbsDirActual = if ([string]::IsNullOrEmpty($ThumbsDir)) { Join-Path $outputDirActual "thumbs" } else { $ThumbsDir }
 
 if (-not (Test-Path $metadataDb)) {
-    Write-Error "metadata.db not found: $metadataDb. Run Step 6 first."
+    Write-Error "metadata directory not found: $metadataDb. Run Step 6 first."
     exit 1
 }
 
@@ -33,7 +33,7 @@ $thumbsScript = Join-Path $scriptsDir "Asset Extraction Pipeline\helper-scripts\
 if (-not (Test-Path $thumbsScript)) { Write-Error "build-thumbs.js not found: $thumbsScript"; exit 1 }
 
 $concurrency = if ($Concurrency -gt 0) { $Concurrency } else { $script:AssetExtractionParallelism }
-Write-Host "Step 7: Build thumbnails from metadata.db (concurrency: $concurrency)"
+Write-Host "Step 7: Build thumbnails from PGLite metadata (concurrency: $concurrency)"
 $nodeArgs = @("$thumbsScript", "--db", $metadataDb, "--images-dir", $imagesDirActual, "--thumbs-dir", $thumbsDirActual, "--concurrency", $concurrency)
 if ($Test) { $nodeArgs += "--test" }
 if ($SkipExisting) { $nodeArgs += "--skip-existing" }
