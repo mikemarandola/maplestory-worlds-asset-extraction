@@ -1,0 +1,223 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "codeblock://asset-preload-runner-001",
+  "ContentType": "x-mod/codeblock",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.1.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "CoreVersion": {
+        "Major": 0,
+        "Minor": 2
+      },
+      "ScriptVersion": {
+        "Major": 1,
+        "Minor": 0
+      },
+      "Description": "Drives PreloadAsync in batches; calls AssetRuidList and AssetProgressUpdater. loadMethod: 1=PreloadAsync+ClearCaches+Unload0, 2=PreloadAsync+RemoveCaches+Unload0, 3=PreloadAsync+RemoveCaches+Unload2, 4=LoadAndWait per RUID+RemoveCaches+Unload0.",
+      "Id": "asset-preload-runner-001",
+      "Language": 1,
+      "Name": "AssetPreloadRunner",
+      "Type": 1,
+      "Source": 0,
+      "Target": null,
+      "Properties": [
+        {
+          "Type": "number",
+          "DefaultValue": "1",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "loadMethod"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "200",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "method4ChunkSize"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "1000",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "batchSize"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "13",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "concurrentBatches"
+        },
+        {
+          "Type": "boolean",
+          "DefaultValue": "true",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "unloadAfterDownload"
+        },
+        {
+          "Type": "any",
+          "DefaultValue": "nil",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "batches"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "currentBatchIndex"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "totalBatches"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "inFlightCount"
+        },
+        {
+          "Type": "any",
+          "DefaultValue": "nil",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "loadedPerType"
+        },
+        {
+          "Type": "any",
+          "DefaultValue": "nil",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "totalPerType"
+        },
+        {
+          "Type": "boolean",
+          "DefaultValue": "false",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "isRunning"
+        },
+        {
+          "Type": "any",
+          "DefaultValue": "nil",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "_m4Batch"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "_m4BatchIdx"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "_m4Index"
+        },
+        {
+          "Type": "any",
+          "DefaultValue": "nil",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "_m4U"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "1",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "startRow"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "totalCount"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "loadStartTime"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0.25",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "uiRefreshInterval"
+        }
+      ],
+      "Methods": [
+        {
+          "Return": {
+            "Type": "void",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [],
+          "Code": "return",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "OnInitialize"
+        },
+        {
+          "Return": {
+            "Type": "void",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [],
+          "Code": "if self.isRunning then return end\nlocal ruidList = self.Entity.AssetRuidList\nif not ruidList or not isvalid(ruidList) then return end\nruidList:GetBatchesAsync(self.batchSize or 50, function(batches)\n  if not batches or #batches == 0 then return end\n  self.batches = batches\n  self.startRow = math.max(1, tonumber(ruidList.startRow) or 1)\n  self.totalCount = tonumber(ruidList.totalCount) or 0\n  self.totalPerType = {}\n  for _, b in ipairs(self.batches) do\n    for _, sheet in ipairs(b.types) do\n      self.totalPerType[sheet] = (self.totalPerType[sheet] or 0) + 1\n    end\n  end\n  self.loadedPerType = {}\n  for k, _ in pairs(self.totalPerType) do self.loadedPerType[k] = 0 end\n  self.currentBatchIndex = 1\n  self.totalBatches = #self.batches\n  self.inFlightCount = 0\n  self.loadStartTime = os.clock()\n  self.isRunning = true\n  local updater = self.Entity.AssetProgressUpdater\n  if updater and isvalid(updater) then updater:Refresh(self.loadedPerType, self.totalPerType, self.startRow, self.totalCount) end\n  local runner = self\n  local interval = math.max(0.05, tonumber(self.uiRefreshInterval) or 0.25)\n  local function refreshUi()\n    if not runner.isRunning then return end\n    if updater and isvalid(updater) then updater:Refresh(runner.loadedPerType, runner.totalPerType, runner.startRow, runner.totalCount) end\n    _TimerService:SetTimerOnce(refreshUi, interval)\n  end\n  _TimerService:SetTimerOnce(refreshUi, interval)\n  local concurrent = self.concurrentBatches or 5\n  for c = 1, concurrent do self:StartNextBatch() end\nend)",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "StartLoading"
+        },
+        {
+          "Return": {
+            "Type": "void",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [],
+          "Code": "if not self.isRunning or self.currentBatchIndex > self.totalBatches then\n  if self.inFlightCount == 0 and self.currentBatchIndex > self.totalBatches then\n    self.isRunning = false\n    local updater = self.Entity.AssetProgressUpdater\n    if updater and isvalid(updater) then updater:Refresh(self.loadedPerType, self.totalPerType, self.startRow, self.totalCount) end\n    log(\"[AssetPreloadRunner] DONE - all batches complete\")\n  end\n  return\nend\nif self._m4Batch then\n  local batch = self._m4Batch\n  local batchIdx = self._m4BatchIdx\n  local u = self._m4U\n  local startIdx = self._m4Index\n  local chunkSize = math.min(self.method4ChunkSize or 10, #batch.ruids - startIdx + 1)\n  for i = startIdx, startIdx + chunkSize - 1 do\n    local ruid = batch.ruids[i]\n    local sheet = batch.types[i] or \"Unknown\"\n    local resTypeStr = \"\"\n    local getOk, resType = pcall(function() return _ResourceService:GetTypeAndWait(ruid) end)\n    if getOk and resType then resTypeStr = tostring(resType):lower() end\n    local loadOk = false\n    if resTypeStr:find(\"sprite\") then\n      loadOk = pcall(function() _ResourceService:LoadSpriteAndWait(ruid) end)\n    elseif resTypeStr:find(\"animation\") then\n      loadOk = pcall(function() _ResourceService:LoadAnimationClipAndWait(ruid) end)\n    else\n      loadOk = true\n    end\n    if loadOk then self.loadedPerType[sheet] = (self.loadedPerType[sheet] or 0) + 1 end\n  end\n  self._m4Index = startIdx + chunkSize\n  if u and isvalid(u) then u:Refresh(self.loadedPerType, self.totalPerType, self.startRow, self.totalCount) end\n  if self._m4Index > #batch.ruids then\n    log(\"[AssetPreloadRunner] batch \" .. tostring(batchIdx) .. \" method=4 UNLOADING...\")\n    _ResourceService:RemoveCaches(batch.ruids)\n    _ResourceService:UnloadUnusedResources(0)\n    collectgarbage(\"collect\")\n    log(\"[AssetPreloadRunner] batch \" .. tostring(batchIdx) .. \" method=4 UNLOADED\")\n    self.batches[batchIdx] = nil\n    self._m4Batch = nil\n    self._m4BatchIdx = nil\n    self._m4Index = nil\n    self._m4U = nil\n  end\n  _TimerService:SetTimerOnce(function() self:StartNextBatch() end, 0)\n  return\nend\nlocal batch = self.batches[self.currentBatchIndex]\nlocal batchIdx = self.currentBatchIndex\nself.currentBatchIndex = self.currentBatchIndex + 1\nlocal method = self.loadMethod or 1\nif method == 4 then\n  self._m4Batch = batch\n  self._m4BatchIdx = batchIdx\n  self._m4U = self.Entity.AssetProgressUpdater\n  self._m4Index = 1\n  _TimerService:SetTimerOnce(function() self:StartNextBatch() end, 0)\n  return\nend\nself.inFlightCount = self.inFlightCount + 1\nlocal shouldUnload = (self.unloadAfterDownload == true) or (self.unloadAfterDownload == nil)\n_ResourceService:PreloadAsync(batch.ruids, function(results)\n  self.inFlightCount = self.inFlightCount - 1\n  for i, sheet in ipairs(batch.types) do\n    self.loadedPerType[sheet] = (self.loadedPerType[sheet] or 0) + 1\n  end\n  self.batches[batchIdx] = nil\n  if shouldUnload then\n    log(\"[AssetPreloadRunner] batch \" .. tostring(batchIdx) .. \" method=\" .. tostring(method) .. \" UNLOADING...\")\n    if method == 1 then\n      _ResourceService:ClearCaches()\n      _ResourceService:UnloadUnusedResources(0)\n    elseif method == 2 then\n      _ResourceService:RemoveCaches(batch.ruids)\n      _ResourceService:UnloadUnusedResources(0)\n    else\n      _ResourceService:RemoveCaches(batch.ruids)\n      _ResourceService:UnloadUnusedResources(2)\n    end\n    collectgarbage(\"collect\")\n    log(\"[AssetPreloadRunner] batch \" .. tostring(batchIdx) .. \" UNLOADED\")\n  end\n  local u = self.Entity.AssetProgressUpdater\n  if u and isvalid(u) then u:Refresh(self.loadedPerType, self.totalPerType, self.startRow, self.totalCount) end\n  _TimerService:SetTimerOnce(function() self:StartNextBatch() end, 0)\nend)",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "StartNextBatch"
+        }
+      ],
+      "EntityEventHandlers": []
+    }
+  }
+}

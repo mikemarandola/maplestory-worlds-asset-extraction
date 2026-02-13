@@ -1,0 +1,21 @@
+{
+  "name": "asset-extraction",
+  "version": "0.1.0",
+  "description": "MSW asset extraction pipeline; step 7 builds metadata SQLite DB.",
+  "private": true,
+  "scripts": {
+    "build-metadata-db": "node scripts/build-metadata-db.js",
+    "build-thumbs": "node scripts/build-thumbs.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.6.0",
+    "csv-parse": "^5.6.0",
+    "decode-dxt": "^1.0.1",
+    "gifenc": "^1.0.3",
+    "papaparse": "^5.4.1",
+    "parse-dds": "^1.2.1",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.33.5",
+    "sharp-apng": "^0.1.5"
+  }
+}

@@ -1,0 +1,35 @@
+# Dependencies (do not commit; install locally via npm install / pip install)
+node_modules/
+package-lock.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+.venv/
+*.egg-info/
+*.egg
+.eggs/
+
+# Reference documentation (excluded from repo)
+Reference Documents/
+
+# Resources data (excluded from repo)
+resources.csv
+RootDesk/MyDesk/resources.csv
+RootDesk/MyDesk/resources_test.csv
+
+# Asset extraction: generated outputs, runtime, and test run paths
+asset-extraction/output*/
+asset-extraction/output-test/
+asset-extraction/temp/
+asset-extraction/temp-test/
+asset-extraction/logs/
+
+# Metadata Downloader: token storage, generated outputs, and test run path
+Metadata Downloader/env/
+Metadata Downloader/resources.csv
+Metadata Downloader/last_pages.csv
+Metadata Downloader/test/

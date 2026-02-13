@@ -1,0 +1,54 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "codeblock://start-load-trigger-001",
+  "ContentType": "x-mod/codeblock",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.1.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "CoreVersion": {
+        "Major": 0,
+        "Minor": 2
+      },
+      "ScriptVersion": {
+        "Major": 1,
+        "Minor": 0
+      },
+      "Description": "Attach to SubmitButton. On click: read StartingRow input, set start row, toggle UI, tell AssetPreloadRunner to StartLoading().",
+      "Id": "start-load-trigger-001",
+      "Language": 1,
+      "Name": "StartLoadTrigger",
+      "Type": 1,
+      "Source": 0,
+      "Target": null,
+      "Properties": [
+        {
+          "Type": "string",
+          "DefaultValue": "\"/maps/map01/Asset Runner\"",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "runnerEntityPath"
+        }
+      ],
+      "Methods": [],
+      "EntityEventHandlers": [
+        {
+          "Name": "OnSubmitClick",
+          "EventName": "ButtonClickEvent",
+          "ParameterName": "event",
+          "Target": "self",
+          "Code": "local runnerEntity = _EntityService:GetEntityByPath(self.runnerEntityPath or \"/maps/map01/Asset Runner\")\nif not runnerEntity or not isvalid(runnerEntity) then return end\nlocal ruidList = runnerEntity.AssetRuidList\nlocal runner = runnerEntity.AssetPreloadRunner\nif not ruidList or not runner or not isvalid(ruidList) or not isvalid(runner) then return end\nlocal inputEntity = _EntityService:GetEntityByPath(\"/ui/AssetProgressGroup/StartingRow\")\nlocal text = \"\"\nif inputEntity and isvalid(inputEntity) then\n  if inputEntity.TextInputComponent then text = inputEntity.TextInputComponent.Text or \"\"\n  elseif inputEntity.TextComponent then text = inputEntity.TextComponent.Text or \"\" end\nend\nlocal row = tonumber(text)\nif not row or row < 1 then row = 1 end\nruidList.startRow = math.floor(row)\nif inputEntity and isvalid(inputEntity) then inputEntity.Enable = false end\nlocal btnEntity = _EntityService:GetEntityByPath(\"/ui/AssetProgressGroup/SubmitButton\")\nif btnEntity and isvalid(btnEntity) then btnEntity.Enable = false end\nlocal progressEntity = _EntityService:GetEntityByPath(\"/ui/AssetProgressGroup/ProgressText\")\nif progressEntity and isvalid(progressEntity) then progressEntity.Enable = true end\nfor _, path in ipairs({\"/ui/AssetProgressGroup/ProgressColumnSprite\",\"/ui/AssetProgressGroup/ProgressColumnAnimationClip\",\"/ui/AssetProgressGroup/ProgressColumnAvatarItem\",\"/ui/AssetProgressGroup/ProgressColumnAudioClip\"}) do local e = _EntityService:GetEntityByPath(path) if e and isvalid(e) then e.Enable = true end end\nlocal confirmEntity = _EntityService:GetEntityByPath(\"/ui/AssetProgressGroup/StartingRowConfirmation\")\nif confirmEntity and isvalid(confirmEntity) then\n  confirmEntity.Enable = true\n  if confirmEntity.TextComponent then confirmEntity.TextComponent.Text = \"Starting load from row \" .. tostring(row) end\nend\nruidList:BeginChunkedLoad(function() runner:StartLoading() end)\n_UserService.LocalPlayer.Enable = false",
+          "Scope": 0,
+          "ExecSpace": 0
+        }
+      ]
+    }
+  }
+}

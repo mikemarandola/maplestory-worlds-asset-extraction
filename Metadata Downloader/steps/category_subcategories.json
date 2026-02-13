@@ -1,0 +1,72 @@
+{
+  "comment":"Category and subcategory IDs/names from the resource site URL. Only listed subcategories are scraped. Include \"-1\": \"all\" at the end of a category's subcategories to also scrape the 'all' segment for that category (scraped last).",
+  "categories":{
+     "0":{
+        "name":"sprite",
+        "subcategories":{
+           "5":"object",
+           "6":"foothold",
+           "7":"monster",
+           "8":"npc",
+           "9":"trap",
+           "10":"item",
+           "11":"skill",
+           "12":"background",
+           "14":"ladder",
+           "15":"rope",
+           "17":"portal",
+           "18":"etc",
+           "-1":"all"
+        }
+     },
+     "1":{
+        "name":"audioclip",
+        "subcategories":{
+           "7":"monster",
+           "10":"item",
+           "11":"skill",
+           "18":"etc",
+           "19":"bgm",
+           "-1":"all"
+        }
+     },
+     "3":{
+        "name":"animationclip",
+        "subcategories":{
+           "5":"object",
+           "7":"monster",
+           "8":"npc",
+           "9":"trap",
+           "10":"item",
+           "11":"skill",
+           "12":"background",
+           "17":"portal",
+           "18":"etc",
+           "-1":"all"
+        }
+     },
+     "25":{
+        "name":"avataritem",
+        "subcategories":{
+           "26":"skin",
+           "27":"hair",
+           "28":"face",
+           "29":"cap",
+           "30":"cape",
+           "31":"coat",
+           "32":"glove",
+           "33":"longcoat",
+           "34":"pants",
+           "35":"shoes",
+           "37":"face acc",
+           "38":"eye acc",
+           "39":"ear acc",
+           "40":"1h weapon",
+           "41":"2h weapon",
+           "42":"sub weapon",
+           "43":"ear",
+           "-1":"all"
+        }
+     }
+  }
+}

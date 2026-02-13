@@ -1,0 +1,243 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "codeblock://asset-ruid-list-001",
+  "ContentType": "x-mod/codeblock",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.1.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "CoreVersion": {
+        "Major": 0,
+        "Minor": 2
+      },
+      "ScriptVersion": {
+        "Major": 1,
+        "Minor": 1
+      },
+      "Description": "Load ASSET_LIST from UserDataSet (dataSetName). resources.csv: RUID, Category, Subcategory. Categories (MSW): Sprite, AnimationClip, AvatarItem, AudioClip. Toggles per category and Object/Effect (subcategory) true=include, false=skip. Attach to player.",
+      "Id": "asset-ruid-list-001",
+      "Language": 1,
+      "Name": "AssetRuidList",
+      "Type": 1,
+      "Source": 0,
+      "Target": null,
+      "Properties": [
+        {
+          "Type": "any",
+          "DefaultValue": "nil",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "ASSET_LIST"
+        },
+        {
+          "Type": "any",
+          "DefaultValue": "nil",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "totalPerType"
+        },
+        {
+          "Type": "string",
+          "DefaultValue": "\"resources\"",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "dataSetName"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "100000",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "maxListSize"
+        },
+        {
+          "Type": "boolean",
+          "DefaultValue": "true",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "Sprite"
+        },
+        {
+          "Type": "boolean",
+          "DefaultValue": "true",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "AnimationClip"
+        },
+        {
+          "Type": "boolean",
+          "DefaultValue": "true",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "Audio"
+        },
+        {
+          "Type": "boolean",
+          "DefaultValue": "true",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "AvatarItem"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "1",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "startRow"
+        },
+        {
+          "Type": "number",
+          "DefaultValue": "0",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "totalCount"
+        },
+        {
+          "Type": "any",
+          "DefaultValue": "nil",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "_loadState"
+        },
+        {
+          "Type": "integer",
+          "DefaultValue": "100000",
+          "SyncDirection": 0,
+          "Attributes": [],
+          "Name": "rowsPerFrame"
+        }
+      ],
+      "Methods": [
+        {
+          "Return": {
+            "Type": "void",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [],
+          "Code": "return",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "OnInitialize"
+        },
+        {
+          "Return": {
+            "Type": "void",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [
+            {
+              "Type": "any",
+              "DefaultValue": null,
+              "SyncDirection": 0,
+              "Attributes": [],
+              "Name": "onComplete"
+            }
+          ],
+          "Code": "if self._loadState then return end\nif not self.dataSetName or self.dataSetName == \"\" or not _DataService then self.ASSET_LIST = {} self.totalPerType = {} self.totalCount = 0 if onComplete then onComplete() end return end\nlocal tableName = self.dataSetName or \"resources\"\nlocal csvData = _DataService:GetTable(tableName)\nif not csvData then log(\"[AssetRuidList] GetTable nil\") if onComplete then onComplete() end return end\nlocal allRows = csvData:GetAllRow()\nif not allRows then log(\"[AssetRuidList] GetAllRow nil\") if onComplete then onComplete() end return end\nlocal rowCount = 0\nfor _ in ipairs(allRows) do rowCount = rowCount + 1 end\nlocal columnLookup = {}\nif csvData.Columns then\n  for _, name in ipairs(csvData.Columns) do\n    if name then columnLookup[name] = name local t = (name:gsub(\"^\\239\\187\\191\", \"\")) if t ~= name then columnLookup[t] = name end end\n  end\n  for _, name in ipairs(csvData.Columns) do\n    if name then local t = (name:gsub(\"^\\239\\187\\191\", \"\")) columnLookup[name] = name if t ~= name then columnLookup[t] = name end local ln = name:lower() if not columnLookup[ln] then columnLookup[ln] = name end end\n  end\nend\nlocal function GetItemSafe(row, col)\n  local actual = columnLookup[col] or columnLookup[col:lower()]\n  if not actual then return nil end\n  local ok, val = pcall(function() return row:GetItem(actual) end)\n  return ok and val or nil\nend\nlocal function toProp(s) if not s or s == \"\" then return nil end return s:sub(1,1):upper()..s:sub(2):lower() end\nlocal chunkSize = math.max(1, math.floor(tonumber(self.maxListSize) or 5000))\nself._loadState = { rowIndex = 1, rowCount = rowCount, allRows = allRows, columnLookup = columnLookup, chunks = {}, currentChunk = {}, chunkSize = chunkSize, totalPerType = {}, added = 0, callback = onComplete }\nlocal pe = _EntityService:GetEntityByPath(\"/ui/AssetProgressGroup/ProgressText\")\nif pe and isvalid(pe) and pe.TextComponent then pe.TextComponent.Text = \"Loading CSV data... 0 / \" .. tostring(rowCount) end\n_TimerService:SetTimerOnce(function() self:ProcessNextChunk() end, 0)",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "BeginChunkedLoad"
+        },
+        {
+          "Return": {
+            "Type": "void",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [],
+          "Code": "local state = self._loadState\nif not state then return end\nlocal ROWS_PER_FRAME = self.rowsPerFrame\nlocal GetItemSafe = function(row, col) local actual = state.columnLookup[col] or state.columnLookup[col:lower()] if not actual then return nil end local ok, val = pcall(function() return row:GetItem(actual) end) return ok and val or nil end\nlocal function toProp(s) if not s or s == \"\" then return nil end return s:sub(1,1):upper()..s:sub(2):lower() end\nlocal startIdx = state.rowIndex\nlocal endIdx = math.min(startIdx + ROWS_PER_FRAME - 1, state.rowCount)\nfor i = startIdx, endIdx do\n  pcall(function()\n    local row = state.allRows[i]\n    if not row then return end\n    local ruid = GetItemSafe(row, \"RUID\")\n    local ruidStr = (ruid and tostring(ruid):match(\"^%s*(.-)%s*$\")) or \"\"\n    if ruidStr == \"\" or ruidStr:lower() == \"ruid\" then return end\n    if #ruidStr ~= 32 or not ruidStr:match(\"^[0-9a-fA-F]+$\") then return end\n    local cat = GetItemSafe(row, \"Category\") local sub = GetItemSafe(row, \"Subcategory\")\n    local catStr = (cat and tostring(cat) ~= \"\") and tostring(cat) or \"Unknown\"\n    local subStr = (sub and tostring(sub) ~= \"\") and tostring(sub) or \"\"\n    local catProp = toProp(catStr)\n    if catProp == \"Audioclip\" then catProp = \"Audio\" elseif catProp == \"Avataritem\" then catProp = \"AvatarItem\" elseif catProp == \"Animationclip\" then catProp = \"AnimationClip\" end\n    if catProp and self[catProp] == false then return end\n    if subStr ~= \"\" then local subProp = toProp(subStr) if subProp and self[subProp] == false then return end end\n    local typeKey = (subStr ~= \"\") and (catStr .. \" / \" .. subStr) or catStr\n    table.insert(state.currentChunk, { category = catStr, subcategory = subStr, ruid = ruidStr, typeKey = typeKey })\n    state.totalPerType[typeKey] = (state.totalPerType[typeKey] or 0) + 1\n    if #state.currentChunk >= state.chunkSize then table.insert(state.chunks, state.currentChunk) state.currentChunk = {} end\n    state.added = state.added + 1\n  end)\nend\nstate.rowIndex = endIdx + 1\nlocal pe = _EntityService:GetEntityByPath(\"/ui/AssetProgressGroup/ProgressText\")\nif pe and isvalid(pe) and pe.TextComponent then pe.TextComponent.Text = \"Loading CSV data... \" .. tostring(state.added) .. \" / \" .. tostring(state.rowCount) end\nif state.rowIndex > state.rowCount then\n  if #state.currentChunk > 0 then table.insert(state.chunks, state.currentChunk) end\n  local flat = {}\n  local idx = 0\n  for _, chunk in ipairs(state.chunks) do\n    for _, e in ipairs(chunk) do\n      if type(e) == \"table\" and e.ruid then idx = idx + 1 e.originalIndex = idx table.insert(flat, e) end\n    end\n  end\n  table.sort(flat, function(a, b)\n    local ac = tostring(a.category or \"\")\n    local bc = tostring(b.category or \"\")\n    if ac ~= bc then return ac < bc end\n    local as = tostring(a.subcategory or \"\")\n    local bs = tostring(b.subcategory or \"\")\n    if as ~= bs then return as < bs end\n    return (tonumber(a.originalIndex) or 0) < (tonumber(b.originalIndex) or 0)\n  end)\n  log(\"[AssetRuidList] STEP 1: assigning ASSET_LIST, #flat = \" .. tostring(#flat))\n  local ok1, err1 = pcall(function() self.ASSET_LIST = flat end)\n  if not ok1 then log(\"[AssetRuidList] STEP 1 FAILED: \" .. tostring(err1)) return end\n  log(\"[AssetRuidList] STEP 1 OK\")\n  log(\"[AssetRuidList] STEP 2: assigning totalPerType\")\n  local ok2, err2 = pcall(function() self.totalPerType = state.totalPerType end)\n  if not ok2 then log(\"[AssetRuidList] STEP 2 FAILED: \" .. tostring(err2)) return end\n  log(\"[AssetRuidList] STEP 2 OK\")\n  log(\"[AssetRuidList] STEP 3: assigning totalCount\")\n  local ok3, err3 = pcall(function() self.totalCount = #flat end)\n  if not ok3 then log(\"[AssetRuidList] STEP 3 FAILED: \" .. tostring(err3)) return end\n  log(\"[AssetRuidList] STEP 3 OK\")\n  log(\"[AssetRuidList] STEP 4: clearing _loadState\")\n  local ok4, err4 = pcall(function() self._loadState = nil end)\n  if not ok4 then log(\"[AssetRuidList] STEP 4 FAILED: \" .. tostring(err4)) return end\n  log(\"[AssetRuidList] STEP 4 OK\")\n  log(\"[AssetRuidList] chunked load done: \" .. tostring(#flat) .. \" entries (sorted by category, subcategory, csv order)\")\n  log(\"[AssetRuidList] STEP 5: calling callback (deferred)\")\n  if state.callback then\n    local cb = state.callback\n    _TimerService:SetTimerOnce(function()\n      local ok5, err5 = pcall(cb)\n      if not ok5 then log(\"[AssetRuidList] STEP 5 (callback) FAILED: \" .. tostring(err5))\n      else log(\"[AssetRuidList] STEP 5 OK\") end\n    end, 0)\n  end\nelse\n  _TimerService:SetTimerOnce(function() self:ProcessNextChunk() end, 0)\nend",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "ProcessNextChunk"
+        },
+        {
+          "Return": {
+            "Type": "any",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [
+            {
+              "Type": "number",
+              "DefaultValue": null,
+              "SyncDirection": 0,
+              "Attributes": [],
+              "Name": "batchSize"
+            }
+          ],
+          "Code": "local size = batchSize or 50\nif not self.ASSET_LIST or #self.ASSET_LIST == 0 then\n  log(\"[AssetRuidList] GetBatches: ASSET_LIST empty, returning {}\")\n  return {}\nend\nlocal startRow = math.max(1, tonumber(self.startRow) or 1)\nlocal totalCount = #self.ASSET_LIST\nif startRow > totalCount then log(\"[AssetRuidList] GetBatches: startRow \" .. tostring(startRow) .. \" > total \" .. tostring(totalCount) .. \", returning {}\") return {} end\nlocal filteredList = {}\nfor i = startRow, totalCount do\n  local e = self.ASSET_LIST[i]\n  if e then table.insert(filteredList, e) end\nend\nlocal batches = {}\nfor i = 1, #filteredList, size do\n  local ruids = {}\n  local types = {}\n  for j = i, math.min(i + size - 1, #filteredList) do\n    local e = filteredList[j]\n    table.insert(ruids, e.ruid)\n    table.insert(types, e.typeKey or e.sheet or \"Unknown\")\n  end\n  table.insert(batches, { ruids = ruids, types = types })\nend\nlog(\"[AssetRuidList] GetBatches(batchSize=\" .. tostring(size) .. \", startRow=\" .. tostring(startRow) .. \") -> \" .. tostring(#batches) .. \" batches from \" .. tostring(#filteredList) .. \" entries (rows \" .. tostring(startRow) .. \"-\" .. tostring(startRow + #filteredList - 1) .. \" of \" .. tostring(totalCount) .. \")\")\nreturn batches",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "GetBatches"
+        },
+        {
+          "Return": {
+            "Type": "void",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [
+            {
+              "Type": "number",
+              "DefaultValue": null,
+              "SyncDirection": 0,
+              "Attributes": [],
+              "Name": "batchSize"
+            },
+            {
+              "Type": "any",
+              "DefaultValue": null,
+              "SyncDirection": 0,
+              "Attributes": [],
+              "Name": "onBatchesReady"
+            }
+          ],
+          "Code": "local size = batchSize or 50\nif not self.ASSET_LIST or #self.ASSET_LIST == 0 then\n  if onBatchesReady then onBatchesReady({}) end\n  return\nend\nlocal startRow = math.max(1, tonumber(self.startRow) or 1)\nlocal totalCount = #self.ASSET_LIST\nif startRow > totalCount then\n  if onBatchesReady then onBatchesReady({}) end\n  return\nend\nlocal FILTER_CHUNK = 5000\nlocal state = {\n  list = self,\n  filteredList = {},\n  nextIdx = startRow,\n  totalCount = totalCount,\n  size = size,\n  onDone = onBatchesReady\n}\nlocal function buildFilterChunk()\n  local limit = math.min(state.nextIdx + FILTER_CHUNK - 1, state.totalCount)\n  for i = state.nextIdx, limit do\n    local e = state.list.ASSET_LIST[i]\n    if e then table.insert(state.filteredList, e) end\n  end\n  state.nextIdx = limit + 1\n  if state.nextIdx > state.totalCount then\n    _TimerService:SetTimerOnce(function()\n      local batches = {}\n      for i = 1, #state.filteredList, state.size do\n        local ruids = {}\n        local types = {}\n        for j = i, math.min(i + state.size - 1, #state.filteredList) do\n          local e = state.filteredList[j]\n          table.insert(ruids, e.ruid)\n          table.insert(types, e.typeKey or e.sheet or \"Unknown\")\n        end\n        table.insert(batches, { ruids = ruids, types = types })\n      end\n      log(\"[AssetRuidList] GetBatchesAsync -> \" .. tostring(#batches) .. \" batches from \" .. tostring(#state.filteredList) .. \" entries\")\n      if state.onDone then state.onDone(batches) end\n    end, 0)\n  else\n    _TimerService:SetTimerOnce(buildFilterChunk, 0)\n  end\nend\nbuildFilterChunk()",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "GetBatchesAsync"
+        },
+        {
+          "Return": {
+            "Type": "any",
+            "DefaultValue": null,
+            "SyncDirection": 0,
+            "Attributes": [],
+            "Name": null
+          },
+          "Arguments": [],
+          "Code": "return self.totalPerType or {}",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "GetTotalPerType"
+        }
+      ],
+      "EntityEventHandlers": []
+    }
+  }
+}

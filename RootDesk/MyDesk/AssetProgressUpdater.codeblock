@@ -1,0 +1,47 @@
+{
+  "Id": "",
+  "GameId": "",
+  "EntryKey": "codeblock://asset-progress-updater-001",
+  "ContentType": "x-mod/codeblock",
+  "Content": "",
+  "Usage": 0,
+  "UsePublish": 1,
+  "UseService": 0,
+  "CoreVersion": "26.1.0.0",
+  "StudioVersion": "0.1.0.0",
+  "DynamicLoading": 0,
+  "ContentProto": {
+    "Use": "Json",
+    "Json": {
+      "CoreVersion": { "Major": 0, "Minor": 2 },
+      "ScriptVersion": { "Major": 1, "Minor": 0 },
+      "Description": "Column view: 4 progress columns (Sprite, AnimationClip, AvatarItem, AudioClip) per MSW. Each column: Title, percent, done/total, then subcategory lines. StartingRowConfirmation shows Row X of Y.",
+      "Id": "asset-progress-updater-001",
+      "Language": 1,
+      "Name": "AssetProgressUpdater",
+      "Type": 1,
+      "Source": 0,
+      "Target": null,
+      "Properties": [
+        { "Type": "string", "DefaultValue": "\"\"", "SyncDirection": 0, "Attributes": [], "Name": "completionTextPath" }
+      ],
+      "Methods": [
+        {
+          "Return": { "Type": "void", "DefaultValue": null, "SyncDirection": 0, "Attributes": [], "Name": null },
+          "Arguments": [
+            { "Type": "any", "DefaultValue": null, "SyncDirection": 0, "Attributes": [], "Name": "loadedPerType" },
+            { "Type": "any", "DefaultValue": null, "SyncDirection": 0, "Attributes": [], "Name": "totalPerType" },
+            { "Type": "number", "DefaultValue": null, "SyncDirection": 0, "Attributes": [], "Name": "startRow" },
+            { "Type": "number", "DefaultValue": null, "SyncDirection": 0, "Attributes": [], "Name": "totalCount" }
+          ],
+          "Code": "if not loadedPerType or not totalPerType then return end\nlocal startRow = (startRow and tonumber(startRow)) or 1\nlocal totalCount = (totalCount and tonumber(totalCount)) or 0\nlocal loadedCount = 0\nfor _, n in pairs(loadedPerType) do loadedCount = loadedCount + (tonumber(n) or 0) end\nlocal currentRow = (loadedCount > 0) and (startRow + loadedCount - 1) or startRow\nlocal confirmEntity = _EntityService:GetEntityByPath(\"/ui/AssetProgressGroup/StartingRowConfirmation\")\nif confirmEntity and isvalid(confirmEntity) and confirmEntity.TextComponent then\n  confirmEntity.TextComponent.Text = \"Row \" .. tostring(currentRow) .. \" of \" .. tostring(totalCount)\nend\nlocal progressText = \"\"\nlocal runner = self.Entity and self.Entity.AssetPreloadRunner\nlocal startTime = runner and runner.loadStartTime\nif startTime and totalCount > 0 then\n  if loadedCount >= totalCount then\n    progressText = \"Estimated time remaining: 0 seconds\"\n  elseif loadedCount > 0 then\n    local elapsed = os.clock() - startTime\n    local remainingSec = elapsed * (totalCount - loadedCount) / loadedCount\n    remainingSec = math.max(0, math.floor(remainingSec))\n    local d = math.floor(remainingSec / 86400)\n    remainingSec = remainingSec % 86400\n    local h = math.floor(remainingSec / 3600)\n    remainingSec = remainingSec % 3600\n    local m = math.floor(remainingSec / 60)\n    local s = remainingSec % 60\n    local parts = {}\n    if d > 0 then table.insert(parts, tostring(d) .. \" day\" .. (d == 1 and \"\" or \"s\")) end\n    if h > 0 then table.insert(parts, tostring(h) .. \" hour\" .. (h == 1 and \"\" or \"s\")) end\n    if m > 0 then table.insert(parts, tostring(m) .. \" minute\" .. (m == 1 and \"\" or \"s\")) end\n    table.insert(parts, tostring(s) .. \" second\" .. (s == 1 and \"\" or \"s\"))\n    progressText = \"Estimated time remaining: \" .. table.concat(parts, \" \")\n  else\n    progressText = \"Estimated time remaining: calculating...\"\n  end\nend\nif progressText ~= \"\" then\n  local pe = _EntityService:GetEntityByPath(\"/ui/AssetProgressGroup/ProgressText\")\n  if pe and isvalid(pe) and pe.TextComponent then pe.TextComponent.Text = progressText end\nend\nlocal columns = { { name = \"Sprite\", path = \"/ui/AssetProgressGroup/ProgressColumnSprite\", key = \"sprite\" }, { name = \"AnimationClip\", path = \"/ui/AssetProgressGroup/ProgressColumnAnimationClip\", key = \"animationclip\" }, { name = \"AvatarItem\", path = \"/ui/AssetProgressGroup/ProgressColumnAvatarItem\", key = \"avataritem\" }, { name = \"AudioClip\", path = \"/ui/AssetProgressGroup/ProgressColumnAudioClip\", key = \"audioclip\" } }\nlocal function catForKey(typeKey)\n  local cat = (typeKey and typeKey:match(\"^([^/]+)\")) or typeKey or \"\"\n  cat = cat:gsub(\"^%s+\", \"\"):gsub(\"%s+$\", \"\"):lower()\n  if cat == \"sprite\" or cat == \"animationclip\" or cat == \"avataritem\" or cat == \"audioclip\" then return cat end\n  return \"other\"\nend\nfor _, col in ipairs(columns) do\n  local lines = {}\n  table.insert(lines, col.name)\n  local typeKeysForCat = {}\n  for typeKey, _ in pairs(totalPerType) do if catForKey(typeKey) == col.key then table.insert(typeKeysForCat, typeKey) end end\n  table.sort(typeKeysForCat)\n  local totalCat = 0\n  local loadedCat = 0\n  for _, tk in ipairs(typeKeysForCat) do totalCat = totalCat + (tonumber(totalPerType[tk]) or 0) loadedCat = loadedCat + (tonumber(loadedPerType[tk]) or 0) end\n  if totalCat == 0 then table.insert(lines, \"not selected for load\") else\n    local pct = math.floor(loadedCat / totalCat * 100)\n    table.insert(lines, tostring(pct) .. \"%\")\n    table.insert(lines, tostring(loadedCat) .. \" / \" .. tostring(totalCat))\n    for _, typeKey in ipairs(typeKeysForCat) do local total = tonumber(totalPerType[typeKey]) or 0 local loaded = tonumber(loadedPerType[typeKey]) or 0 local sub = typeKey:find(\" / \") and typeKey:match(\" / (.+)$\") or typeKey sub = sub:gsub(\"^%s+\", \"\"):gsub(\"%s+$\", \"\") table.insert(lines, sub .. \": \" .. tostring(loaded) .. \" / \" .. tostring(total)) end\n  end\n  local entity = _EntityService:GetEntityByPath(col.path)\n  if entity and isvalid(entity) and entity.TextComponent then entity.TextComponent.Text = table.concat(lines, \"\\n\") end\nend\nlocal completionPath = self and self.completionTextPath and self.completionTextPath ~= \"\" and self.completionTextPath\nif completionPath then\n  local completionEntity = _EntityService:GetEntityByPath(completionPath)\n  if completionEntity and isvalid(completionEntity) and completionEntity.TextComponent then\n    if totalCount > 0 and currentRow >= totalCount then\n      completionEntity.TextComponent.Text = \"Loading complete. You can stop the world and start it with a new start row for the next category.\"\n    else\n      completionEntity.TextComponent.Text = \"\"\n    end\n  end\nend",
+          "Scope": 2,
+          "ExecSpace": 6,
+          "Attributes": [],
+          "Name": "Refresh"
+        }
+      ],
+      "EntityEventHandlers": []
+    }
+  }
+}
